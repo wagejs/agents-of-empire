@@ -1,8 +1,9 @@
 import { PRESETS, PLANETS_ORDER } from './hud-data.js'
 import { PLANETS } from '../world/planet.js'
-import { TIMES } from '../world/sky.js'
+import { TIMES, systemTimeOfDay } from '../world/sky.js'
 import { STATUS_LABEL } from '../game/colony.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
+import { PLOT_PALETTE, hashString } from '../world/plots.js'
 
 /**
  * The whole HUD, in plain DOM.
@@ -59,6 +60,7 @@ export class Hud {
     this.actions = actions
     this.visible = true
     this._last = {}
+    this.hiddenOpen = false
 
     this.el = document.createElement('div')
     this.el.className = 'hud'
@@ -197,16 +199,28 @@ export class Hud {
     const light = group('Lighting')
     light.append(
       chips(
-        TIMES.map((t) => ({ id: t.id, label: t.label })),
-        () => nearestTime(this.settings.get('timeOfDay')),
+        // `Live` is a time of day like the others from where you are standing, so it belongs
+        // in the same row rather than in a toggle further down.
+        [...TIMES.map((t) => ({ id: t.id, label: t.label })), { id: 'live', label: 'Live' }],
+        () => (this.settings.get('clockTime') ? 'live' : nearestTime(this.settings.get('timeOfDay'))),
         (id) => {
           this.settings.set('autoTime', false)
-          this.settings.set('timeOfDay', TIMES.find((t) => t.id === id).value)
+          this.settings.set('clockTime', id === 'live')
+          if (id === 'live') this.settings.set('timeOfDay', systemTimeOfDay())
+          else this.settings.set('timeOfDay', TIMES.find((t) => t.id === id).value)
         },
         this.controls
       ),
-      this._slider('Time of day', 'timeOfDay', 0, 1, 0.005, clockLabel),
-      this._toggle('Cycle day/night', 'autoTime', 'Runs the clock forward on its own.'),
+      this._slider('Time of day', 'timeOfDay', 0, 1, 0.005, clockLabel, undefined, () => {
+        // Reaching for the slider is a request for a particular light, so stop following the
+        // clock — otherwise the next frame would drag the thumb straight back.
+        this.settings.set('clockTime', false)
+      }),
+      this._toggle(
+        'Cycle day/night',
+        'autoTime',
+        'Runs the clock forward on its own. Ignored while the sky is following this machine’s clock.'
+      ),
       this._slider('Cycle length', 'dayLength', 30, 900, 30, (v) => `${Math.round(v / 60)}m`),
       this._toggle(
         'Environment light',
@@ -221,6 +235,13 @@ export class Hud {
 
     // View.
     const view = group('View')
+    view.append(
+      this._toggle(
+        'Hide dormant repos',
+        'hideDormant',
+        'Takes a repo off the map when every thread in it has been quiet for three days. Its threads are untouched, and it comes back to the same ground the moment one wakes up.'
+      )
+    )
     view.append(
       this._toggle('Return to isometric', 'autoFrame', 'Eases the angle back when you stop dragging.'),
       this._slider('Field of view', 'fov', 20, 60, 1, (v) => `${v}°`),
@@ -281,7 +302,7 @@ export class Hud {
     return row
   }
 
-  _slider(label, key, min, max, step, format, hint) {
+  _slider(label, key, min, max, step, format, hint, onInput) {
     const row = this._row(label, hint)
     const wrap = document.createElement('div')
     wrap.style.cssText = 'display:flex;align-items:center;gap:8px'
@@ -293,7 +314,10 @@ export class Hud {
     input.step = step
     const out = document.createElement('span')
     out.className = 'value'
-    input.addEventListener('input', () => this.settings.set(key, Number(input.value)))
+    input.addEventListener('input', () => {
+      onInput?.()
+      this.settings.set(key, Number(input.value))
+    })
     wrap.append(input, out)
     row.appendChild(wrap)
     this.controls.push({
@@ -336,11 +360,14 @@ export class Hud {
     on('#btn-planet', 'click', () => this.actions.cyclePlanet?.())
     on('#btn-time', 'click', () => this.actions.cycleTime?.())
     on('#btn-open', 'click', () => this.actions.openThread?.())
+    on('#btn-viewed', 'click', () => this.actions.markViewed?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
     on('#btn-reveal', 'click', () => this.actions.revealProject?.())
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
+    on('#btn-hide-project', 'click', () => this.actions.hideProject?.())
+    on('#btn-hidden-toggle', 'click', () => this.toggleHiddenList())
     on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.name))
     on('#btn-close-project', 'click', () => this.actions.closeProject?.())
     on('.help', 'click', (e) => {
@@ -375,8 +402,12 @@ export class Hud {
    * it is a list now because the sidebar is where all the chrome lives, and because a list
    * can carry a count and an alarm without running out of room at eleven repos.
    */
-  setLegend(projects, activeName = null) {
-    const signature = projects.map((p) => `${p.name}:${p.count}:${p.accent}:${p.urgent ? 1 : 0}`).join('|') + `~${activeName}`
+  setLegend(projects, activeName = null, hidden = [], folded = []) {
+    const signature =
+      projects.map((p) => `${p.name}:${p.count}:${p.accent}:${p.urgent ? 1 : 0}`).join('|') +
+      `~${activeName}~` +
+      hidden.map((p) => `${p.name}:${p.count}`).join('|') +
+      `~${folded.length}`
     if (this._last.legend === signature) return
     this._last.legend = signature
 
@@ -397,6 +428,63 @@ export class Hud {
       wrap.appendChild(b)
     }
     this.$('.sec-head span').textContent = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
+
+    // The hidden list is its own block at the foot of the sidebar: collapsed by default, because
+    // the whole point of hiding a repo is not to look at it.
+    const block = this.$('.hidden-block')
+    block.hidden = hidden.length === 0 && folded.length === 0
+    const hiddenWrap = this.$('.hidden-projects')
+    hiddenWrap.innerHTML = ''
+    for (const p of hidden) {
+      const accent = PLOT_PALETTE[hashString(p.name) % PLOT_PALETTE.length]
+      const row = document.createElement('div')
+      row.className = 'repo hidden-repo'
+      row.innerHTML =
+        `<i class="swatch" style="background:${hex(accent)};color:${hex(accent)}"></i>` +
+        `<span class="n">${escapeHtml(p.name)}</span>` +
+        `<span class="count">${p.count}</span>`
+      const show = document.createElement('button')
+      show.type = 'button'
+      show.className = 'btn ghost show-repo'
+      show.title = `Show ${p.name} on the map again`
+      show.textContent = 'Show'
+      show.addEventListener('click', () => this.actions.unhideProject?.(p.name))
+      row.appendChild(show)
+      hiddenWrap.appendChild(row)
+    }
+
+    // The dormant fold gets one line rather than a row each: it is a setting, not a list of
+    // decisions, and the thing worth offering is the way back rather than per-repo control.
+    if (folded.length) {
+      const n = folded.reduce((sum, p) => sum + p.count, 0)
+      const row = document.createElement('div')
+      row.className = 'repo hidden-repo folded-note'
+      row.innerHTML =
+        `<span class="n">${folded.length} quiet repo${folded.length === 1 ? '' : 's'}` +
+        `, ${n} thread${n === 1 ? '' : 's'}</span>`
+      const show = document.createElement('button')
+      show.type = 'button'
+      show.className = 'btn ghost show-repo'
+      show.title = 'Put dormant repos back on the map'
+      show.textContent = 'Show'
+      show.addEventListener('click', () => this.settings.set('hideDormant', false))
+      row.appendChild(show)
+      hiddenWrap.appendChild(row)
+    }
+
+    const total = hidden.length + folded.length
+    this.$('#btn-hidden-toggle .label').textContent = `${total} off the map`
+    this._syncHiddenList()
+  }
+
+  toggleHiddenList() {
+    this.hiddenOpen = !this.hiddenOpen
+    this._syncHiddenList()
+  }
+
+  _syncHiddenList() {
+    this.$('#btn-hidden-toggle').setAttribute('aria-expanded', String(this.hiddenOpen))
+    this.$('.hidden-projects').hidden = !this.hiddenOpen
   }
 
   /**
@@ -517,6 +605,10 @@ export class Hud {
     // often is how a HUD starts costing frames.
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
     this.$('#btn-open').disabled = thread.canOpen === false
+    // Only offered when there is something to dismiss. A third button on every card would
+    // crowd the two that are always worth having, and "Viewed" on a thread that is not asking
+    // for anything is a control with no effect.
+    this.$('#btn-viewed').hidden = !thread.unread
   }
 
   /**
@@ -826,6 +918,12 @@ const TEMPLATE = `
     <div class="projects-pane">
       <div class="sec-head"><span>Repos</span></div>
       <div class="projects"></div>
+      <div class="hidden-block" hidden>
+        <button type="button" class="hidden-toggle" id="btn-hidden-toggle" aria-expanded="false">
+          <span class="label">0 hidden</span>
+        </button>
+        <div class="hidden-projects" hidden></div>
+      </div>
     </div>
 
     <div class="project-detail">
@@ -844,6 +942,7 @@ const TEMPLATE = `
           <button class="btn" id="btn-reveal" title="Show this folder in ${FILE_MANAGER}">${ICON.folder} ${FILE_MANAGER}</button>
           <button class="btn" id="btn-copy-path" title="Copy the folder path">${ICON.copy} Copy path</button>
         </div>
+        <button class="btn" id="btn-hide-project" title="Hide this repo from the colony — does not archive its threads">${ICON.eyeOff} Hide from colony</button>
       </div>
       <div class="threads-head"></div>
       <div class="threads"></div>
@@ -878,6 +977,7 @@ const TEMPLATE = `
   <div class="progress"><i></i></div>
   <div class="pair">
     <button class="btn primary" id="btn-open" title="Open this thread in the harness it came from (Enter)">${ICON.open} Open</button>
+    <button class="btn" id="btn-viewed" title="Stop this thread asking for you until it moves on again (V)">${ICON.eye} Viewed</button>
     <button class="btn" id="btn-archive" title="Archive — this astronaut walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
 </div>
@@ -889,7 +989,7 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Bot Crossing</h2>
-    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
+    <p class="sub">Every coding-agent thread on this machine is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Hide a repo from that panel if you would rather not see it — its threads stay in your harness, and you can show it again from the list. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
     <div class="cols">
       <div>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
@@ -905,6 +1005,7 @@ const TEMPLATE = `
       <div>
         <div class="k"><span>Next needing you</span><kbd>N</kbd></div>
         <div class="k"><span>Open thread</span><kbd>Enter</kbd></div>
+        <div class="k"><span>Mark viewed</span><kbd>V</kbd></div>
         <div class="k"><span>Archive</span><kbd>A</kbd></div>
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>

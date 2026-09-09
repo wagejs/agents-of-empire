@@ -7,8 +7,10 @@
  * `server/harnesses/README.md`.
  */
 import claudeCode from './claude-code.mjs'
+import codex from './codex.mjs'
+import cursor from './cursor.mjs'
 
-export const HARNESSES = [claudeCode]
+export const HARNESSES = [claudeCode, codex, cursor]
 
 export const harnessById = (id) => HARNESSES.find((h) => h.id === id) || null
 
