@@ -888,9 +888,30 @@ export class Hud {
   }
 
   /** Redraw the card's face so it blinks in step with the astronaut it belongs to. */
-  updateAvatar(faceAtlasCanvas) {
+  updateAvatar(faceAtlasCanvas, portraits) {
     if (!this.selected || !faceAtlasCanvas) return
     const agent = this.selected.agent
+    // A skeleton shows its own portrait, framed in its eye colour, which is its status.
+    const portrait = portraits?.[agent.skeleton]
+    if (portrait) {
+      const css = cssFromGlow(agent.eye)
+      if (this._avatarState.frame === agent.skeleton && this._avatarState.color === css) return
+      this._avatarState = { frame: agent.skeleton, color: css }
+      const c = this.avatarCtx
+      const size = 108
+      const glow = c.createRadialGradient(size / 2, size * 0.45, 4, size / 2, size / 2, size * 0.7)
+      glow.addColorStop(0, css)
+      glow.addColorStop(1, '#06070c')
+      c.globalAlpha = 1
+      c.fillStyle = '#06070c'
+      c.fillRect(0, 0, size, size)
+      c.globalAlpha = 0.45
+      c.fillStyle = glow
+      c.fillRect(0, 0, size, size)
+      c.globalAlpha = 1
+      c.drawImage(portrait, 0, 0, size, size)
+      return
+    }
     const frame = agent.faceFrame ?? FACE.idle
     const color = agent.eye
     const css = cssFromGlow(color)

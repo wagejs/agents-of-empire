@@ -32,6 +32,37 @@ const DEFAULT_SURFACE = [0.55, 0.15]
 const CASTLE = 'building_castle_blue'
 const CASTLE_SCALE = 2.9
 
+/** The gate the crew walks out through: how far in front of the castle, and its size. */
+const GATE = 'wall_straight_gate'
+const GATE_OUT = 1.4
+const GATE_SCALE = 2.4
+
+/**
+ * The castle with its gate stood in front, doors swung open, as one geometry. The pack's gate
+ * is a wall with two door leaves hung at ±0.45; each leaf is turned a quarter round on its
+ * hinge. Without the gate in the kit, just the castle.
+ */
+function withGate(castle, z) {
+  castle.scale(CASTLE_SCALE, CASTLE_SCALE, CASTLE_SCALE)
+  if (!hasPart(GATE, 'medieval')) return castle
+  const m = new THREE.Matrix4()
+  const leaf = (name, x, turn) => {
+    const g = part(name, 'medieval')
+    g.applyMatrix4(m.makeRotationY(turn))
+    g.applyMatrix4(m.makeTranslation(x, 0, 0))
+    return g
+  }
+  const pieces = [
+    part(GATE, 'medieval', { solo: true }),
+    leaf(`${GATE}_door_left`, 0.45, -Math.PI / 2),
+    leaf(`${GATE}_door_right`, -0.45, Math.PI / 2),
+  ]
+  for (const g of pieces) g.applyMatrix4(m.makeScale(GATE_SCALE, GATE_SCALE, GATE_SCALE).setPosition(0, 0, z))
+  const merged = BufferGeometryUtils.mergeGeometries([castle, ...pieces], false)
+  for (const g of [castle, ...pieces]) g.dispose()
+  return merged
+}
+
 export class Ship {
   constructor(scene, position) {
     this.group = new THREE.Group()
@@ -285,18 +316,18 @@ export class Ship {
       this.airlockLocal.copy(this._shipLocals.airlock)
       return
     }
-    const geo = part(CASTLE, 'medieval')
-    geo.scale(CASTLE_SCALE, CASTLE_SCALE, CASTLE_SCALE)
+    const front = 1.0 * CASTLE_SCALE
+    const geo = withGate(part(CASTLE, 'medieval'), front + GATE_OUT)
     const material = new THREE.MeshStandardMaterial({ map: atlasTexture('medieval'), roughness: 0.85, metalness: 0 })
     material.onBeforeCompile = (shader) => withCurve(shader)
     this.castle = new THREE.Mesh(geo, material)
     this.castle.castShadow = this.castle.receiveShadow = true
     this.castle.name = 'castle'
     this.group.add(this.castle)
-    // The gate is on the castle's +z face, which the group already turns toward the colony.
-    const front = 1.0 * CASTLE_SCALE
+    // The castle's door is on its +z face, which the group already turns toward the colony.
+    // The crew appears inside it and walks out through the gate in front.
     this.airlockLocal.set(0, 0, front - 0.4)
-    this.doorLocal.set(0, 0, front + 1.2)
+    this.doorLocal.set(0, 0, front + GATE_OUT + 2.4)
   }
 
   /** World position of the foot of the ramp — where astronauts appear and vanish. */

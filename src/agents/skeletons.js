@@ -30,10 +30,56 @@ export function loadSkeletons(rig) {
         geometries[SKELETON_TYPES[i]] = mergeSkeleton(gltf.scene, rig.boneIndex)
         gltf.scene.traverse((o) => (map ||= o.material?.map || null))
       })
-      return { geometries, map }
+      return { geometries, map, portraits: portraits(gltfs) }
     })
   }
   return loading
+}
+
+/** Size of a card portrait, in pixels: the card shows it at 46 CSS px, so this is sharp at 2x. */
+const PORTRAIT = 108
+/** Where the face sits above the head bone, and how far back the camera stands. Tuned by eye. */
+const FACE_LIFT = 0.5
+const FACE_DISTANCE = 2.5
+
+/**
+ * Head-and-shoulders pictures of each skeleton, for the agent card: one throwaway renderer,
+ * four renders, then let go. Missing when WebGL is not on offer; the card keeps its face then.
+ */
+function portraits(gltfs) {
+  let renderer
+  try {
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true })
+  } catch {
+    return {}
+  }
+  renderer.setSize(PORTRAIT, PORTRAIT, false)
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  const out = {}
+  gltfs.forEach((gltf, i) => {
+    const scene = new THREE.Scene()
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 2.2))
+    const sun = new THREE.DirectionalLight(0xffffff, 2)
+    sun.position.set(1.5, 3, 4)
+    scene.add(sun, gltf.scene)
+    gltf.scene.updateMatrixWorld(true)
+    // Framed on the head bone, not the bounding box, so a tall hat does not shove the face down.
+    const head = new THREE.Vector3()
+    gltf.scene.getObjectByName('head')?.getWorldPosition(head)
+    head.y += FACE_LIFT
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50)
+    camera.position.set(head.x + FACE_DISTANCE * 0.3, head.y + 0.15, head.z + FACE_DISTANCE)
+    camera.lookAt(head)
+    renderer.render(scene, camera)
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = PORTRAIT
+    canvas.getContext('2d').drawImage(renderer.domElement, 0, 0)
+    out[SKELETON_TYPES[i]] = canvas
+    scene.remove(gltf.scene)
+  })
+  renderer.dispose()
+  renderer.forceContextLoss()
+  return out
 }
 
 /** A skeleton joint's index in the crew rig. The hand slots are the hands. */

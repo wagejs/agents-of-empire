@@ -555,6 +555,7 @@ export class Plot {
     this.lampMaterial = new THREE.MeshBasicMaterial({ color: this.accent, toneMapped: true })
     this.lamps = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(lamps), this.lampMaterial)
     this._lampBase = new THREE.Color(this.accent)
+    this.posts = poleMesh
     this.group.add(poleMesh, this.lamps)
     posts.forEach((g) => g.dispose())
     lamps.forEach((g) => g.dispose())
@@ -690,7 +691,9 @@ export class Plot {
   setGround(style) {
     if ((this.groundStyle || 'plate') === style) return
     // On a tiled world the hex tile under the plot is its ground; the deck would only hide it.
-    this.deck.visible = style !== 'tiles'
+    // The plot is plain there too: no coloured kerb, lamps or crates. Its buildings carry the
+    // colour that matters, which is what each thread is doing.
+    for (const o of [this.deck, this.border, this.posts, this.lamps, this.clutter]) if (o) o.visible = style !== 'tiles'
     const m = this.deck.material
     this._plate ??= { map: m.map, normalMap: m.normalMap, roughnessMap: m.roughnessMap, color: m.color.clone(), metalness: m.metalness, roughness: m.roughness }
     if (style === 'grass') {

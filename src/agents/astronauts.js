@@ -332,6 +332,7 @@ export class Astronauts {
 
   /** The merged skeleton bodies, from `loadSkeletons`. */
   setSkeletons(data) {
+    this.portraits = data.portraits || {}
     this.skeletonData = data
     this._buildSkeletons()
   }

@@ -45,6 +45,7 @@ const MEDIEVAL = [
     : n.startsWith('hex_river') ? `tiles/rivers/${n}`
     : n.startsWith('hex_coast') ? `tiles/coast/waterless/${n}`
     : n === 'hex_grass' ? `tiles/base/${n}`
+    : n.startsWith('wall_') ? `buildings/neutral/${n}`
     : `decoration/nature/${n}`
   ),
 ]

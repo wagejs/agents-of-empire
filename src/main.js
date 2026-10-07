@@ -1316,7 +1316,7 @@ engine.add({
     engine.setFocusDistance(rig.distance)
 
     if (selectedId) {
-      hud.updateAvatar(colony.astronauts.faceTexture.image)
+      hud.updateAvatar(colony.astronauts.faceTexture.image, colony.astronauts.crewStyle === 'skeletons' ? colony.astronauts.portraits : null)
       // A selected astronaut that walked off the roster should not keep a stale card open.
       const agent = colony.agentFor(selectedId)
       if (!agent) select(null, {})

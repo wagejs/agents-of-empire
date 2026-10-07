@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { atlasTexture, hasPart, part } from './kit.js'
 import { withCurve } from '../core/curve.js'
+import { SHIP_CELL } from './plot-move.js'
 
 /**
  * The Medieval planet's ground: KayKit hex tiles laid on the plot lattice.
@@ -70,8 +71,17 @@ const DECOR = {
 export const TILES = { road: ROADS, river: RIVERS, coast: COASTS }
 
 /** Every model the board can ask for — what the asset build has to pack. */
+/**
+ * Roads are drawn as the castle's walls: grass underneath, and a run of wall from the middle
+ * of the tile out to each edge the road leaves by. The pack's wall is two tile-units long and
+ * a building's height, so it is stretched along its run and kept at the castle's size across.
+ */
+const WALL = 'wall_straight'
+const WALL_SCALE = 2.4
+const WALL_THICK = 0.8 * WALL_SCALE
+
 export const BOARD_MODELS = [
-  'hex_grass', ...Object.keys(ROADS), ...Object.keys(RIVERS), ...Object.keys(COASTS), ...Object.values(DECOR).flat(),
+  'hex_grass', WALL, 'wall_straight_gate', ...Object.keys(ROADS), ...Object.keys(RIVERS), ...Object.keys(COASTS), ...Object.values(DECOR).flat(),
 ]
 
 /**
@@ -370,14 +380,31 @@ export function createHexBoard(board, top, { smooth = true } = {}) {
   if (!hasPart('hex_grass', 'medieval')) return null
   const parts = []
   const m = new THREE.Matrix4()
-  const place = (model, x, z, turn, sx, sy, y = top) => {
+  const place = (model, x, z, turn, sx, sy, y = top, sz = sx) => {
     if (!hasPart(model, 'medieval')) return
     const geo = part(model, 'medieval')
-    geo.applyMatrix4(m.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), turn), new THREE.Vector3(sx, sy, sx)))
+    geo.applyMatrix4(m.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), turn), new THREE.Vector3(sx, sy, sz)))
     parts.push(geo)
   }
+  const isShip = (q, r) => q === SHIP_CELL.q && r === SHIP_CELL.r
   for (const cell of board.values()) {
     const { x, z } = hexToWorld(cell.q, cell.r)
+    // A wall that reaches the castle runs on into it, so the castle stands in the wall.
+    const near = (test) => DIR_ANGLE.filter((_, d) => test(cell.q + HEX_DIRS[d][0], cell.r + HEX_DIRS[d][1]))
+    const walls = cell.kind === 'road' ? [...cell.angles, ...near(isShip)]
+      : isShip(cell.q, cell.r) ? near((q, r) => board.get(key(q, r))?.kind === 'road')
+      : []
+    if (walls.length && hasPart(WALL, 'medieval')) {
+      place('hex_grass', x, z, -Math.PI / 6, TILE_SCALE, TILE_DEPTH)
+      // From just behind the middle, so the runs of a bend overlap, out to the tile's edge.
+      const length = TILE_SCALE + WALL_THICK / 2
+      const mid = (TILE_SCALE - WALL_THICK / 2) / 2
+      for (const a of walls) {
+        const rad = (a * Math.PI) / 180
+        place(WALL, x + Math.cos(rad) * mid, z + Math.sin(rad) * mid, -rad, length / 2, WALL_SCALE, top, WALL_SCALE)
+      }
+      continue
+    }
     const tile = TILES[cell.kind] && tileFor(cell.angles, TILES[cell.kind])
     // Plain grass still takes the half-step turn: the pack is pointy-top, the lattice flat-top.
     place(tile?.model ?? 'hex_grass', x, z, tile?.turn ?? -Math.PI / 6, TILE_SCALE, TILE_DEPTH)
