@@ -76,11 +76,18 @@ export class Search {
     }
     this.el.addEventListener('click', (e) => e.target === this.el && this.close())
     this.$('[data-close]').addEventListener('click', () => this.close())
-    this.box.addEventListener('input', () => this.render())
+    this.box.addEventListener('input', () => {
+      // New words, new list: the highlight starts again at the top.
+      this.selectedId = null
+      this.render()
+    })
     this.box.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.close()
-      // Enter takes the first result somewhere useful: its bot if it is on the map, else its chat.
-      if (e.key === 'Enter') this.results.querySelector('[data-primary]')?.click()
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        this.move(e.key === 'ArrowDown' ? 1 : -1)
+      }
+      else if (e.key === 'Enter') this.enter()
     })
     this.$('[data-archive-idle]').addEventListener('click', () => {
       const idle = this.rows().filter((r) => r.idle && !r.archived)
@@ -122,15 +129,60 @@ export class Search {
       .sort((a, b) => b.thread.lastActivityAt - a.thread.lastActivityAt)
 
     const shown = found.slice(0, LIMIT)
+    this.shown = new Map(shown.map((r) => [r.thread.id, r]))
     this.results.replaceChildren(...shown.map((r) => this.row(r)))
+    // A scan re-renders this panel every few seconds; the highlight stays on the same thread.
+    if (!shown.some((r) => r.thread.id === this.selectedId)) this.selectedId = shown[0]?.thread.id ?? null
+    this.mark()
     const note = found.length > LIMIT ? `Showing ${LIMIT} of ${found.length}. Type more to narrow it down.` : ''
     if (!found.length) this.results.append(el('div', 'search-empty', query ? 'Nothing matches that.' : 'No threads here.'))
     else if (note) this.results.append(el('div', 'search-empty', note))
   }
 
+  /**
+   * Enter on the highlighted result: open its chat, and fly to its bot as well when it is on
+   * the map, so you land beside it already talking. A thread with no chat just gets the flight.
+   */
+  enter() {
+    const r = this.shown?.get(this.selectedId)
+    if (!r) return
+    const t = r.thread
+    if (!t.canChat && !r.onMap) return
+    this.close()
+    if (r.onMap) this.actions.go(t)
+    if (t.canChat) this.actions.chat(t)
+  }
+
+  /** ↑ / ↓ through the results, wrapping at either end. */
+  move(step) {
+    const rows = [...this.results.querySelectorAll('.search-row')]
+    if (!rows.length) return
+    const at = rows.findIndex((row) => row.dataset.id === this.selectedId)
+    this.selectedId = rows[(at + step + rows.length) % rows.length].dataset.id
+    this.mark()
+  }
+
+  selectedRow() {
+    return [...this.results.querySelectorAll('.search-row')].find((row) => row.dataset.id === this.selectedId) || null
+  }
+
+  mark() {
+    for (const row of this.results.querySelectorAll('.search-row')) {
+      row.setAttribute('aria-selected', String(row.dataset.id === this.selectedId))
+    }
+    this.selectedRow()?.scrollIntoView({ block: 'nearest' })
+  }
+
   row(r) {
     const { thread: t } = r
     const item = el('div', `search-row${r.archived ? ' archived' : ''}`)
+    item.dataset.id = t.id
+    // Pointing at a row highlights it too, so Enter and the mouse agree on which one is meant.
+    item.addEventListener('mousemove', () => {
+      if (this.selectedId === t.id) return
+      this.selectedId = t.id
+      this.mark()
+    })
     const info = el('div', 'info')
     info.append(el('div', 'title', t.title || 'Untitled thread'))
     const where = [t.project, t.gitBranch, t.harnessName, r.archived ? (r.revivable ? 'Archived' : `Archived in ${t.harnessName || 'its harness'}`) : r.statusLabel, ago(t.lastActivityAt)]

@@ -1768,8 +1768,10 @@ body {
   border-radius: 10px;
 }
 
-.search-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+/* The highlighted result: ↑ / ↓ move it, the mouse moves it, Enter opens it. */
+.search-row[aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .search-row.archived .info {
