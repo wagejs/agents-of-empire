@@ -293,7 +293,7 @@ const STAGES = [
 /** What most threads grow into, and what only the biggest ones become. */
 const MEDIEVAL_COMMON = [
   ['home_A', 'House'], ['home_B', 'House'], ['tavern', 'Tavern'], ['blacksmith', 'Blacksmith'],
-  ['market', 'Market'], ['well', 'Well'], ['lumbermill', 'Lumber mill'], ['mine', 'Mine'],
+  ['market', 'Market'], ['lumbermill', 'Lumber mill'], ['mine', 'Mine'],
   ['barracks', 'Barracks'], ['archeryrange', 'Archery range'], ['watermill', 'Watermill'], ['tower_A', 'Tower'],
 ]
 // No castle: the castle is the colony's home — see Ship.setStyle.

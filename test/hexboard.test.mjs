@@ -1,7 +1,7 @@
 /** The Medieval planet's hex tiles: every connection has a tile, and the board is laid sensibly. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { HEX_DIRS, TILES, layoutBoard, tileFor, subdivide } from '../src/world/hexboard.js'
+import { HEX_DIRS, TILES, layoutBoard, layoutFromMap, tileFor, subdivide, unmatched } from '../src/world/hexboard.js'
 import * as THREE from 'three'
 
 const ANGLES = [30, 90, 150, 210, 270, 330]
@@ -55,4 +55,28 @@ test('subdividing keeps the surface and shortens every edge', () => {
     area += new THREE.Triangle(a, b, c).getArea()
   }
   assert.ok(Math.abs(area - 100) < 1e-6)
+})
+
+test('a painted map: roads join up, a river runs out to sea, plots stay grass', () => {
+  const cells = []
+  for (let q = -3; q <= 3; q++) for (let r = -3; r <= 3; r++) {
+    if ((Math.abs(q) + Math.abs(q + r) + Math.abs(r)) / 2 > 3) continue
+    cells.push([q, r, r === 0 ? 'road' : q === 3 && r < 0 ? 'river' : q === -2 && r === 2 ? 'peaks' : 'grass'])
+  }
+  const footprint = [{ q: 0, r: 0 }]
+  const board = layoutFromMap({ version: 1, cells }, footprint)
+  // The plot cell was painted road; it is grass, and the roads either side of it end there.
+  assert.equal(board.get('0,0').kind, 'grass')
+  assert.equal(board.get('1,0').kind, 'road')
+  assert.equal(board.get('2,0').angles.length, 2)
+  // The river's top end is on the shore, so it opens out to the sea there.
+  const top = board.get('3,-3')
+  assert.equal(top.kind, 'river')
+  assert.equal(top.angles.length, 2)
+  assert.equal(board.get('-2,2').decor.kind, 'peaks')
+  assert.ok([...board.values()].some((c) => c.kind === 'coast'))
+  assert.equal(board.has('5,5'), false) // unpainted is sea
+  assert.deepEqual(unmatched({ cells }, footprint), [])
+  // A lone river tile in the middle of the land has nowhere to run.
+  assert.equal(unmatched({ cells: [...cells.filter(([q, r]) => !(q === 0 && r === 1)), [0, 1, 'river']] }).length, 1)
 })

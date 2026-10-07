@@ -8,7 +8,7 @@ import { createGrass } from '../world/grass.js'
 import { createSkyIsland } from '../world/skyisland.js'
 import { SKY_MARGIN, SKY_MAX_CELLS, setIslandFootprint } from '../world/planet.js'
 import { createHexIsland } from '../world/hexisland.js'
-import { createHexBoard, layoutBoard } from '../world/hexboard.js'
+import { blockedByMap, boardMap, createHexBoard, layoutBoard, layoutFromMap } from '../world/hexboard.js'
 import { bendPoint } from '../core/curve.js'
 import { Sky } from '../world/sky.js'
 import {
@@ -22,7 +22,7 @@ import {
   PLOT_PALETTE,
   PLOT_CELL,
 } from '../world/plots.js'
-import { SHIP_CELL, translateCells } from '../world/plot-move.js'
+import { SHIP_CELL, setBlockedCells, translateCells } from '../world/plot-move.js'
 import { createBuilding, buildingUniforms, medievalLook, Scaffolds } from '../world/buildings.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
@@ -256,7 +256,9 @@ export class Colony {
     if (!this.planet.board) return
     const footprint = [SHIP_CELL]
     for (const plot of this.plotOrder || []) footprint.push(...plot.cells)
-    const cells = layoutBoard(footprint)
+    // A map painted in tools/map-editor.html wins; without one the island is generated.
+    const map = boardMap()
+    const cells = map ? layoutFromMap(map, footprint) : layoutBoard(footprint)
     this.board = createHexBoard(cells, DECK_TOP)
     if (!this.board) return // the kit is not in yet; `onAssetsReady` builds the terrain again
     this.boardCells = cells
@@ -639,6 +641,8 @@ export class Colony {
     // The previous layout is an input, so a zone only moves when its own footprint changes
     // — never because a different repo gained or lost a thread. `plotCells` carries it
     // between polls, and the colony file carries it between sessions.
+    // A painted map's roads, rivers and woods stay put: zones grow round them.
+    setBlockedCells(this.planet.board ? blockedByMap(boardMap()) : [])
     const layout = allocateCells(
       projects.map(([name, list]) => ({ id: name, size: list.length })),
       this.plotCells

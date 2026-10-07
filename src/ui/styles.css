@@ -1675,7 +1675,8 @@ body {
   padding: 6px 10px;
 }
 
-.chat-form .mode-pick {
+.chat-form .mode-pick,
+.chat-form .model-pick {
   height: 40px;
   font-size: 12px;
 }

@@ -1101,7 +1101,7 @@ function shortPath(dir, max = 30) {
   return `…/${out}`
 }
 
-function shortModel(model) {
+export function shortModel(model) {
   return String(model).replace(/^claude-/, '').replace(/-\d{8}$/, '')
 }
 

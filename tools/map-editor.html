@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Editor</title>
+<!--
+  The Medieval planet's map editor. Dev only: `npm run dev`, then open
+  http://localhost:5274/tools/map-editor.html
+
+  Paint what each hex tile is; the road, river and coast pieces are picked from the
+  neighbours the same way the game picks them (src/world/hexboard.js). Save writes the map
+  as medieval.json — put it in public/maps/. "Live preview" shows it in any open game tab
+  in this browser straight away.
+-->
+<style>
+  :root { --bg: #e8eef3; --panel: #ffffff; --ink: #1e2a35; --muted: #6a7682; --line: #d5dde4; --accent: #2f6fd6; --warn: #c8402c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151a20; --panel: #1f262e; --ink: #e6edf3; --muted: #8b96a1; --line: #303a45; --accent: #6aa3ff; --warn: #ff7a66; } }
+  * { box-sizing: border-box }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; overflow: hidden }
+  canvas { display: block }
+  .panel { position: absolute; top: 16px; left: 16px; width: 236px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: 0 6px 24px #0002 }
+  h1 { font-size: 15px; margin: 0 0 10px }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px }
+  .paints { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+  button { font: inherit; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; cursor: pointer; text-align: left }
+  button:hover { border-color: var(--accent) }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff }
+  .paints button { display: flex; align-items: center; gap: 7px }
+  .paints i { width: 12px; height: 12px; border-radius: 3px; flex: none }
+  .paints kbd { margin-left: auto; font: 11px ui-monospace, monospace; opacity: .7 }
+  .row { display: flex; gap: 6px; flex-wrap: wrap }
+  .row button { flex: 1 }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 12px }
+  .status { margin-top: 10px; font-size: 12px }
+  .status .warn { color: var(--warn) }
+  label.toggle { display: flex; gap: 8px; align-items: center; margin-top: 8px; cursor: pointer }
+  @media (max-width: 640px) { .panel { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 45vh; overflow: auto } }
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>Medieval map</h1>
+  <h2>Paint</h2>
+  <div class="paints" id="paints"></div>
+  <h2>Brush</h2>
+  <div class="row"><button data-brush="0" class="on">1 tile</button><button data-brush="1">7 tiles</button></div>
+  <h2>File</h2>
+  <div class="row"><button id="save">Save</button><button id="open">Open</button></div>
+  <div class="row" style="margin-top:6px"><button id="generated">Start from generated</button></div>
+  <div class="row" style="margin-top:6px"><button id="undo">Undo</button><button id="clear">Clear</button></div>
+  <label class="toggle"><input type="checkbox" id="live"> Live preview in the game</label>
+  <div class="status" id="status"></div>
+  <div class="hint">Left-drag paints · right-drag turns · shift+right-drag moves · scroll zooms · ⌘Z undoes.<br>
+  Plots start at the ✚ tile and grow outward; they always stand on grass. The castle tile is fixed.</div>
+  <input type="file" id="file" accept="application/json,.json" hidden>
+</div>
+<script type="module">
+import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { loadKit, part, atlasTexture } from '/src/world/kit.js'
+import { HEX_DIRS, MAP_URL, PAINTS, PREVIEW_KEY, boardSeaLevel, createHexBoard, hexToWorld, layoutBoard, layoutFromMap, unmatched } from '/src/world/hexboard.js'
+import { SHIP_CELL } from '/src/world/plot-move.js'
+
+const CELL = 7.6
+const TOP = 0.45 // DECK_TOP in plots.js
+const DRAFT_KEY = 'bot-crossing.map-editor.draft'
+const SWATCH = { sea: '#2d6fb8', grass: '#8dbb3c', road: '#c9a36b', river: '#4fb3e8', trees: '#2f7d3a', rocks: '#9a9a96', hills: '#a77b4f', peaks: '#6c6f78' }
+const LABEL = { sea: 'Sea', grass: 'Grass', road: 'Road', river: 'River', trees: 'Trees', rocks: 'Rocks', hills: 'Hills', peaks: 'Mountain' }
+const TOOLS = ['sea', ...PAINTS]
+const key = (q, r) => `${q},${r}`
+const FIXED = [SHIP_CELL] // the castle stands here, always on grass
+
+// ── state ────────────────────────────────────────────────────────────────────────────
+let cells = new Map() // key → paint
+let tool = 'grass'
+let brush = 0
+const history = []
+
+const toMap = () => ({ version: 1, cells: [...cells].map(([k, kind]) => [...k.split(',').map(Number), kind]) })
+const fromMap = (map) => { cells = new Map((map?.cells || []).filter(([, , k]) => PAINTS.includes(k)).map(([q, r, k]) => [key(q, r), k])) }
+
+function generated() {
+  const footprint = [SHIP_CELL, { q: 0, r: 0 }, ...HEX_DIRS.map(([q, r]) => ({ q, r }))]
+  const board = layoutBoard(footprint)
+  cells = new Map([...board.values()].map((c) => [key(c.q, c.r), c.kind === 'road' || c.kind === 'river' ? c.kind : c.decor?.kind || 'grass']))
+}
+
+// ── scene ────────────────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+renderer.shadowMap.enabled = true
+document.body.prepend(renderer.domElement)
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(0xbcd6ea)
+scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a5a3a, 1.5))
+const sun = new THREE.DirectionalLight(0xfff2dd, 2.4)
+sun.position.set(40, 80, 30)
+sun.castShadow = true
+Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, far: 300 })
+sun.shadow.mapSize.set(2048, 2048)
+scene.add(sun)
+const camera = new THREE.PerspectiveCamera(40, 1, 1, 1000)
+camera.position.set(0, 110, 120)
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE }
+controls.maxPolarAngle = 1.35
+controls.target.set(0, 0, 0)
+
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x2d6fb8, roughness: 0.3 }))
+sea.rotation.x = -Math.PI / 2
+sea.position.y = boardSeaLevel(TOP)
+sea.receiveShadow = true
+scene.add(sea)
+
+// Hex outlines over the paintable area, so the sea has a grid too.
+const RADIUS = 11
+const hexPoints = (q, r, s = 0.98, y = TOP + 0.05) => {
+  const { x, z } = hexToWorld(q, r)
+  const pts = []
+  for (let i = 0; i <= 6; i++) { const a = (Math.PI / 3) * i; pts.push(new THREE.Vector3(x + Math.cos(a) * CELL * s, y, z + Math.sin(a) * CELL * s)) }
+  return pts
+}
+const inRange = (q, r) => (Math.abs(q) + Math.abs(q + r) + Math.abs(r)) / 2 <= RADIUS
+{
+  const segs = []
+  for (let q = -RADIUS; q <= RADIUS; q++) for (let r = -RADIUS; r <= RADIUS; r++) {
+    if (!inRange(q, r)) continue
+    const p = hexPoints(q, r, 1)
+    for (let i = 0; i < 6; i++) segs.push(p[i], p[i + 1])
+  }
+  scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(segs), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 })))
+}
+const outline = (color, opacity = 1) => new THREE.Line(new THREE.BufferGeometry().setFromPoints(hexPoints(0, 0, 0.92, 0)), new THREE.LineBasicMaterial({ color, transparent: true, opacity }))
+const hover = outline(0xffffff)
+scene.add(hover)
+const flags = new THREE.Group()
+scene.add(flags)
+
+// The ✚ where plots start, as a cross on the origin tile.
+{
+  const s = 2.4, y = TOP + 0.1
+  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-s, y, 0), new THREE.Vector3(s, y, 0), new THREE.Vector3(0, y, -s), new THREE.Vector3(0, y, s)])
+  scene.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffd34d })))
+}
+
+let board = null
+let castle = null
+function rebuild() {
+  if (board) { scene.remove(board); board.geometry.dispose(); board.material.dispose() }
+  board = createHexBoard(layoutFromMap(toMap(), FIXED), TOP, { smooth: false })
+  if (board) scene.add(board)
+  if (!castle) {
+    const geo = part('building_castle_blue', 'medieval')
+    geo.scale(2.9, 2.9, 2.9)
+    castle = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: atlasTexture('medieval'), roughness: 0.85 }))
+    const p = hexToWorld(SHIP_CELL.q, SHIP_CELL.r)
+    castle.position.set(p.x, TOP, p.z)
+    castle.rotation.y = Math.atan2(-p.x, -p.z)
+    castle.castShadow = true
+    scene.add(castle)
+  }
+  // Cells painted road or river that no piece can show, in red.
+  flags.clear()
+  const bad = unmatched(toMap(), FIXED)
+  for (const [q, r] of bad) {
+    const line = outline(0xff3b2f)
+    const { x, z } = hexToWorld(q, r)
+    line.position.set(x, TOP + 0.2, z)
+    flags.add(line)
+  }
+  const land = cells.size
+  document.getElementById('status').innerHTML =
+    `${land} land tiles` + (bad.length ? ` · <span class="warn">${bad.length} red: a river needs two ends (another river tile or the shore); a road needs a road next to it</span>` : '')
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(toMap())) } catch {}
+  if (live.checked) try { localStorage.setItem(PREVIEW_KEY, JSON.stringify(toMap())) } catch {}
+}
+
+// ── input ────────────────────────────────────────────────────────────────────────────
+const ray = new THREE.Raycaster()
+const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -TOP)
+const hit = new THREE.Vector3()
+function cellAt(ev) {
+  const box = renderer.domElement.getBoundingClientRect()
+  ray.setFromCamera({ x: ((ev.clientX - box.left) / box.width) * 2 - 1, y: -((ev.clientY - box.top) / box.height) * 2 + 1 }, camera)
+  if (!ray.ray.intersectPlane(plane, hit)) return null
+  // Flat-top axial rounding, through cube coordinates.
+  const fq = ((2 / 3) * hit.x) / CELL
+  const fr = ((-1 / 3) * hit.x + (Math.sqrt(3) / 3) * hit.z) / CELL
+  let q = Math.round(fq), r = Math.round(fr), s = Math.round(-fq - fr)
+  const dq = Math.abs(q - fq), dr = Math.abs(r - fr), ds = Math.abs(s + fq + fr)
+  if (dq > dr && dq > ds) q = -r - s
+  else if (dr > ds) r = -q - s
+  return inRange(q, r) ? { q, r } : null
+}
+function paintAt(c) {
+  const targets = brush ? [c, ...HEX_DIRS.map(([dq, dr]) => ({ q: c.q + dq, r: c.r + dr }))] : [c]
+  let changed = false
+  for (const t of targets) {
+    if (!inRange(t.q, t.r) || FIXED.some((f) => f.q === t.q && f.r === t.r)) continue
+    const k = key(t.q, t.r)
+    const was = cells.get(k)
+    if (tool === 'sea') { if (was !== undefined) { cells.delete(k); changed = true } }
+    else if (was !== tool) { cells.set(k, tool); changed = true }
+  }
+  if (changed) rebuild()
+}
+const snapshot = () => { history.push(new Map(cells)); if (history.length > 100) history.shift() }
+let painting = false
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0) return
+  const c = cellAt(ev)
+  if (!c) return
+  snapshot()
+  painting = true
+  renderer.domElement.setPointerCapture(ev.pointerId)
+  paintAt(c)
+})
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  const c = cellAt(ev)
+  hover.visible = !!c
+  if (c) { const { x, z } = hexToWorld(c.q, c.r); hover.position.set(x, TOP + 0.15, z) }
+  if (painting && c) paintAt(c)
+})
+addEventListener('pointerup', () => (painting = false))
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault())
+
+// ── panel ────────────────────────────────────────────────────────────────────────────
+const live = document.getElementById('live')
+const paintsEl = document.getElementById('paints')
+TOOLS.forEach((t, i) => {
+  const b = document.createElement('button')
+  b.dataset.tool = t
+  b.innerHTML = `<i style="background:${SWATCH[t]}"></i>${LABEL[t]}<kbd>${i}</kbd>`
+  b.onclick = () => setTool(t)
+  paintsEl.append(b)
+})
+function setTool(t) {
+  tool = t
+  for (const b of paintsEl.children) b.classList.toggle('on', b.dataset.tool === t)
+}
+setTool('grass')
+document.querySelectorAll('[data-brush]').forEach((b) => (b.onclick = () => {
+  brush = Number(b.dataset.brush)
+  document.querySelectorAll('[data-brush]').forEach((o) => o.classList.toggle('on', o === b))
+}))
+document.getElementById('save').onclick = () => {
+  const blob = new Blob([JSON.stringify(toMap())], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'medieval.json'
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+const file = document.getElementById('file')
+document.getElementById('open').onclick = () => file.click()
+file.onchange = async () => {
+  const f = file.files[0]
+  if (!f) return
+  try { snapshot(); fromMap(JSON.parse(await f.text())); rebuild() } catch { alert('That file is not a map.') }
+  file.value = ''
+}
+document.getElementById('generated').onclick = () => { snapshot(); generated(); rebuild() }
+document.getElementById('clear').onclick = () => { snapshot(); cells = new Map(); rebuild() }
+const undo = () => { if (history.length) { cells = history.pop(); rebuild() } }
+document.getElementById('undo').onclick = undo
+live.onchange = () => {
+  try {
+    if (live.checked) localStorage.setItem(PREVIEW_KEY, JSON.stringify(toMap()))
+    else localStorage.removeItem(PREVIEW_KEY)
+  } catch {}
+}
+addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); undo(); return }
+  const i = Number(e.key)
+  if (e.key.length === 1 && i >= 0 && i < TOOLS.length) setTool(TOOLS[i])
+})
+try { live.checked = Boolean(localStorage.getItem(PREVIEW_KEY)) } catch {}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight)
+  camera.aspect = innerWidth / innerHeight
+  camera.updateProjectionMatrix()
+}
+addEventListener('resize', resize)
+resize()
+
+// ── start: the draft from last time, else the project's map, else the generated island ──
+await loadKit()
+let start = null
+try { start = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null') } catch {}
+if (!start) try {
+  const res = await fetch('/' + MAP_URL)
+  if (res.ok && (res.headers.get('content-type') || '').includes('json')) start = await res.json()
+} catch {}
+if (start?.cells?.length) fromMap(start)
+else generated()
+rebuild()
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera) })
+window.editorReady = true
+</script>
+</body>
+</html>

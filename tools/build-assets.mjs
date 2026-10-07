@@ -31,7 +31,7 @@ const FOREST = [
  * and the grass hex the plots stand on. Paths are under the pack's `Assets/gltf`.
  */
 const MEDIEVAL_TYPES = [
-  'home_A', 'home_B', 'tavern', 'blacksmith', 'market', 'well', 'lumbermill', 'mine',
+  'home_A', 'home_B', 'tavern', 'blacksmith', 'market', 'lumbermill', 'mine',
   'barracks', 'archeryrange', 'watermill', 'windmill', 'church', 'castle', 'tower_A', 'tower_B',
 ]
 const MEDIEVAL = [

@@ -51,3 +51,7 @@ test('every building a thread can show is in the packed kit', () => {
     }
   }
 })
+
+test('no thread grows into a well', () => {
+  for (let seed = 1; seed < 500; seed++) assert.notEqual(medievalLook(seed, 0.7, 'working').type, 'well')
+})

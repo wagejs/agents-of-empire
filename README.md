@@ -89,6 +89,17 @@ The server listens only on `127.0.0.1`. Chat accepts requests only from this com
 - A thread that runs for a long time gets a church, a windmill or a great tower.
 - In **Settings → Planet**, select **Start on** to open the page on the same planet each time.
 
+### Paint the Medieval map
+
+1. Run `npm run dev`. Open http://localhost:5274/tools/map-editor.html.
+2. Select a paint: sea, grass, road, river, trees, rocks, hills or mountain. Drag on the tiles.
+3. You paint only the type of each tile. The editor selects the correct road, river and coast tile.
+4. A red tile has no correct tile. A river needs two ends: a different river tile or the sea. A road needs a road next to it.
+5. Select **Live preview in the game** to see the map in the open game tab.
+6. Click **Save**. Put `medieval.json` in `public/maps/`. The game uses this map. If there is no map, the game makes an island.
+
+The plots always stand on grass. The castle tile does not change.
+
 
 - Chat accepts requests only from this computer.
 - Chat uses your own `claude` CLI and its login. Nothing goes to a different service.

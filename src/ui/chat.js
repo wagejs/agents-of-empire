@@ -9,8 +9,8 @@
  * and opening its thread again picks it up with everything it said in the meantime. Only Stop
  * ends one early. Which chat was open is remembered for the tab, so a reload brings it back.
  */
-import { chatAttach, chatCommands, chatMessages, chatMode, chatPermission, chatSend, chatStart, chatStop } from '../game/api.js'
-import { ICON } from './hud.js'
+import { chatAttach, chatCommands, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop } from '../game/api.js'
+import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 
 const TEMPLATE = `
@@ -25,6 +25,12 @@ const TEMPLATE = `
   <form class="chat-form">
     <div class="slash-menu" role="listbox" hidden></div>
     <textarea rows="2" placeholder="Message this thread. Enter sends, Shift+Enter adds a line"></textarea>
+    <select class="select model-pick" aria-label="Model" title="Which model replies">
+      <option value="">Default</option>
+      <option value="opus">Opus</option>
+      <option value="sonnet">Sonnet</option>
+      <option value="haiku">Haiku</option>
+    </select>
     <select class="select mode-pick" aria-label="Permission mode" title="What Claude may do without asking you">
       <option value="default">Ask</option>
       <option value="plan">Plan</option>
@@ -104,21 +110,24 @@ const MODES_KEY = 'bot-crossing.chat-modes'
  *   Allow all  nothing asks at all
  *   Deny       anything that would ask is refused instead
  */
-function loadModes() {
+function loadModes(key = MODES_KEY) {
   try {
-    return JSON.parse(localStorage.getItem(MODES_KEY)) || {}
+    return JSON.parse(localStorage.getItem(key)) || {}
   } catch {
     return {}
   }
 }
 
-function saveModes(modes) {
+function saveModes(modes, key = MODES_KEY) {
   try {
-    localStorage.setItem(MODES_KEY, JSON.stringify(modes))
+    localStorage.setItem(key, JSON.stringify(modes))
   } catch {
     /* modes just last until the reload */
   }
 }
+
+/** Each thread's model pick, kept the same way; '' is whatever the thread runs by default. */
+const MODELS_KEY = 'bot-crossing.chat-models'
 
 const SIZES_KEY = 'bot-crossing.chat-sizes'
 
@@ -176,6 +185,8 @@ export class Chat {
     // window never overwrites the size you chose.
     this.modes = loadModes()
     this.$('.mode-pick').addEventListener('change', (e) => this.pickMode(e.target.value))
+    this.models = loadModes(MODELS_KEY)
+    this.$('.model-pick').addEventListener('change', (e) => this.pickModel(e.target.value))
 
     this.sheet = this.$('.sheet')
     this.sizes = loadSizes()
@@ -362,6 +373,29 @@ export class Chat {
     }
   }
 
+  model() {
+    return this.models[this.sizeKey] || ''
+  }
+
+  /** Remember the model for this thread, and switch a reply that is running to it now. */
+  async pickModel(model) {
+    if (!this.sizeKey) return
+    this.models[this.sizeKey] = model
+    saveModes(this.models, MODELS_KEY)
+    if (this.runId) {
+      try {
+        await chatModel(this.runId, model)
+      } catch (err) {
+        this.note(err.message, true)
+      }
+    }
+  }
+
+  /** The header's second line: the harness, and the model replying, as far as it is known. */
+  showModel(model) {
+    this.$('.sub').textContent = [this.harness, model && shortModel(model)].filter(Boolean).join(' · ')
+  }
+
   /** A rename made while this thread's chat is up shows in its header at once. */
   retitle(id, title) {
     if (this.thread?.id === id) this.$('.title').textContent = title
@@ -382,7 +416,8 @@ export class Chat {
     this.folder = folder
     this.blocked = false
     this.$('.title').textContent = title
-    this.$('.sub').textContent = sub
+    this.harness = sub
+    this.showModel(thread?.model)
     this.$('.sub').hidden = false
     this.$('.repo-pick').hidden = true
     this.input.placeholder = placeholder
@@ -391,6 +426,7 @@ export class Chat {
     this.refreshNeedYou()
     this.sizeKey = thread ? thread.id : `new:${folder}`
     this.syncMode()
+    this.$('.model-pick').value = this.model()
     const size = this.sizes[this.sizeKey]
     this.sheet.style.width = size?.width || ''
     this.sheet.style.height = size?.height || ''
@@ -533,7 +569,7 @@ export class Chat {
       if (!thread) return
       this.input.value = ''
       try {
-        await chatSend(thread, text, this.mode())
+        await chatSend(thread, text, this.mode(), this.model())
       } catch (err) {
         this.input.value = text
         this.note(err.message, true)
@@ -546,7 +582,7 @@ export class Chat {
     this.starting = true
     this.sync()
     try {
-      const { runId } = await (thread ? chatSend(thread, text, this.mode()) : chatStart(folder, text, this.mode()))
+      const { runId } = await (thread ? chatSend(thread, text, this.mode(), this.model()) : chatStart(folder, text, this.mode(), this.model()))
       // Moved on while it was starting: it runs anyway, and is there when its thread is opened.
       if (this.thread !== thread || this.folder !== folder) return
       this.starting = false
@@ -599,6 +635,8 @@ export class Chat {
       // And the mode it was started in.
       this.modes[current.id] = this.$('.mode-pick').value
       saveModes(this.modes)
+      this.models[current.id] = this.$('.model-pick').value
+      saveModes(this.models, MODELS_KEY)
       this.sizeKey = current.id
     }
     for (let tries = 0; !finished && !view.signal.aborted && tries < RECONNECTS; tries++) {
@@ -639,6 +677,7 @@ export class Chat {
       this.stream(this.live, event.text)
       return
     }
+    if (event.type === 'model') return this.showModel(event.model)
     this.live = null
     if (event.type === 'queued') this.add('user', event.text).classList.add('queued')
     else if (event.type === 'text') reply.append(markdown(event.text))

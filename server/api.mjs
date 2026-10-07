@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
-import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
+import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, modelOf, setRunModel, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
 import {
   chatTarget,
   defaultHarness,
@@ -461,6 +461,11 @@ async function chat(pathname, req, res) {
     return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
   }
 
+  if (pathname === '/api/chat/model') {
+    const ok = await setRunModel(String(body.runId || ''), body.model)
+    return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
+  }
+
   if (pathname === '/api/chat/stop') {
     const ok = stopRun(String(body.runId || ''))
     return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
@@ -490,7 +495,7 @@ async function chat(pathname, req, res) {
     if (pathname === '/api/chat/new') {
       const cwd = await resolveFolder(body.folder)
       if (!cwd) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
-      return send(res, 200, { runId: (await startChat(cwd, text, modeOf(body.mode))).id })
+      return send(res, 200, { runId: (await startChat(cwd, text, modeOf(body.mode), modelOf(body.model))).id })
     }
 
     const target = await chatTarget(body.harness, body.ref)
@@ -507,7 +512,7 @@ async function chat(pathname, req, res) {
     }
     if (target.busy) return send(res, 409, { ok: false, error: `That thread is mid-turn in ${target.where}. Wait for it to finish` })
     const threadId = typeof body.threadId === 'string' ? body.threadId : ''
-    return send(res, 200, { runId: startRun({ ...target, cwd, threadId, mode: modeOf(body.mode) }, text).id })
+    return send(res, 200, { runId: startRun({ ...target, cwd, threadId, mode: modeOf(body.mode), model: modelOf(body.model) }, text).id })
   }
 
   return send(res, 404, { error: 'Unknown endpoint' })

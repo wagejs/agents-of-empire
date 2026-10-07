@@ -149,3 +149,18 @@ test('a drop into open ground is refused rather than dragging the colony over to
 function hexStep(a, b) {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2
 }
+
+test('painted roads: no zone may take one, but a road between zones still joins them', async () => {
+  const { setBlockedCells, fits } = await import('../src/world/plot-move.js')
+  const layout = new Map([['a', [{ q: 0, r: 0 }]], ['b', [{ q: 2, r: 0 }]]])
+  assert.equal(isConnected(layout), false)
+  setBlockedCells(['1,0'])
+  try {
+    assert.equal(isConnected(layout), true)
+    assert.equal(componentsOf(layout).length, 1)
+    assert.equal(fits(layout, 'a', 1, 0), false)
+    assert.equal(fits(layout, 'a', 0, 1), true)
+  } finally {
+    setBlockedCells([])
+  }
+})

@@ -203,6 +203,103 @@ export function layoutBoard(footprint, seed = 7) {
   return board
 }
 
+// ── painted maps ──────────────────────────────────────────────────────────────────────
+
+/**
+ * What a tile can be painted as, in the map editor (tools/map-editor.html). A painted map
+ * is `{ version: 1, cells: [[q, r, paint], …] }`; anything not listed is sea. Road, river
+ * and coast pieces are not painted: they are picked from the neighbours, as above.
+ */
+export const PAINTS = ['grass', 'road', 'river', 'trees', 'rocks', 'hills', 'peaks']
+
+/** Where a painted map lives, and the key the editor's live preview uses instead. */
+export const MAP_URL = 'maps/medieval.json'
+export const PREVIEW_KEY = 'bot-crossing.board-map.preview'
+
+const cellSeed = (q, r) => (Math.imul(q, 73856093) ^ Math.imul(r, 19349663)) >>> 0
+
+/**
+ * Lay the board out from a painted map. The colony's own cells are always grass — plots
+ * stand on them whatever was painted there — and land is never less than the colony.
+ */
+export function layoutFromMap(map, footprint = []) {
+  const paint = new Map()
+  for (const [q, r, kind] of map?.cells || []) if (PAINTS.includes(kind)) paint.set(key(q, r), kind)
+  for (const c of footprint) paint.set(key(c.q, c.r), 'grass')
+  const kindAt = (q, r) => paint.get(key(q, r))
+  const around = (q, r) => HEX_DIRS.map(([dq, dr], d) => ({ q: q + dq, r: r + dr, angle: DIR_ANGLE[d] }))
+
+  const board = new Map()
+  for (const [k, kind] of paint) {
+    const [q, r] = k.split(',').map(Number)
+    const cell = { q, r, ring: 0, kind: 'grass', angles: [], decor: null }
+    const near = around(q, r)
+    if (kind === 'road') {
+      cell.angles = near.filter((n) => kindAt(n.q, n.r) === 'road').map((n) => n.angle)
+      if (cell.angles.length) cell.kind = 'road'
+    } else if (kind === 'river') {
+      const links = near.filter((n) => kindAt(n.q, n.r) === 'river')
+      const sea = near.filter((n) => !kindAt(n.q, n.r))
+      // A river end on the shore runs out to sea: through the open edge most nearly
+      // opposite the way it came in.
+      if (links.length === 1 && sea.length) {
+        const back = links[0].angle
+        const gap = (n) => Math.abs((((n.angle - back) % 360) + 540) % 360 - 180)
+        links.push(sea.reduce((a, b) => (gap(b) < gap(a) ? b : a)))
+      }
+      cell.angles = links.map((n) => n.angle)
+      if (tileFor(cell.angles, RIVERS)) cell.kind = 'river'
+      else cell.angles = []
+    } else if (DECOR[kind]) {
+      cell.decor = { kind, seed: cellSeed(q, r) }
+    }
+    if (cell.kind === 'grass') {
+      const open = near.filter((n) => !kindAt(n.q, n.r)).map((n) => n.angle)
+      if (open.length && open.length <= 4 && oneArc(open)) {
+        cell.kind = 'coast'
+        cell.angles = open
+        cell.decor = null
+      }
+    }
+    board.set(k, cell)
+  }
+  return board
+}
+
+/** The cells of a painted map that plots must keep off: everything but plain grass. */
+export const blockedByMap = (map) => (map?.cells || []).filter(([, , kind]) => kind !== 'grass').map(([q, r]) => key(q, r))
+
+/** The cells a painted map asked for but no tile can show — what the editor flags. */
+export function unmatched(map, footprint = []) {
+  const board = layoutFromMap(map, footprint)
+  const plots = new Set(footprint.map((c) => key(c.q, c.r)))
+  return (map?.cells || []).filter(
+    ([q, r, kind]) => (kind === 'road' || kind === 'river') && !plots.has(key(q, r)) && board.get(key(q, r))?.kind !== kind
+  )
+}
+
+let paintedMap = null
+/** The painted map the game should use, or null for the generated island. */
+export const boardMap = () => paintedMap
+export function setBoardMap(map) {
+  paintedMap = map?.cells?.length ? map : null
+}
+
+/**
+ * Load the painted map: the editor's live preview if one is running in this browser, else
+ * `public/maps/medieval.json` if it exists. Missing or broken means the generated island.
+ */
+export async function loadBoardMap(base = '/') {
+  try {
+    const preview = localStorage.getItem(PREVIEW_KEY)
+    if (preview) return setBoardMap(JSON.parse(preview))
+  } catch {}
+  try {
+    const res = await fetch(base + MAP_URL)
+    if (res.ok && (res.headers.get('content-type') || '').includes('json')) setBoardMap(await res.json())
+  } catch {}
+}
+
 /** Shortest path from mouth a to mouth b through ring 2. */
 function riverPath(a, b, ringOf, around) {
   const inner = (m) => around(m.q, m.r).filter((n) => ringOf(n.q, n.r) === LAND_RINGS - 1)
@@ -267,9 +364,9 @@ export function subdivide(geometry, max) {
 
 /**
  * Build the board as one mesh, its top at `top`. Needs the medieval kit loaded; returns
- * null until it is. `onDecor(x, z)` says whether a decoration may stand at a point.
+ * null until it is.
  */
-export function createHexBoard(board, top) {
+export function createHexBoard(board, top, { smooth = true } = {}) {
   if (!hasPart('hex_grass', 'medieval')) return null
   const parts = []
   const m = new THREE.Matrix4()
@@ -310,8 +407,9 @@ export function createHexBoard(board, top) {
   }
   const merged = BufferGeometryUtils.mergeGeometries(parts, false)
   parts.forEach((g) => g.dispose())
-  const geo = subdivide(merged, MAX_EDGE)
-  merged.dispose()
+  // The editor rebuilds on every stroke and draws a flat world, so it skips the split.
+  const geo = smooth ? subdivide(merged, MAX_EDGE) : merged
+  if (smooth) merged.dispose()
   const material = new THREE.MeshStandardMaterial({ map: atlasTexture('medieval'), roughness: 0.9, metalness: 0 })
   material.onBeforeCompile = (shader) => withCurve(shader)
   const mesh = new THREE.Mesh(geo, material)

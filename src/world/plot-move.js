@@ -31,6 +31,17 @@ export const POOL_RINGS = 12
 
 export const cellKey = (q, r) => `${q},${r}`
 
+/**
+ * Cells no zone may take: on a painted map, its roads, rivers and dressed tiles. Zones grow
+ * round them and step over them, and they still join the colony up — a road through the
+ * middle of town does not make it two towns. Empty everywhere else.
+ */
+let blocked = new Set()
+export function setBlockedCells(keys) {
+  blocked = new Set(keys)
+}
+export const isBlocked = (q, r) => blocked.has(cellKey(q, r))
+
 /** Hex distance in axial coordinates: the cube distance, halved. */
 export function hexDistance(a, b) {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2
@@ -56,7 +67,7 @@ export function isConnected(out) {
   for (const [, list] of out) for (const c of list) cells.set(cellKey(c.q, c.r), c)
   if (cells.size < 2) return true
   const ship = cellKey(SHIP_CELL.q, SHIP_CELL.r)
-  const passable = new Set([...cells.keys(), ship])
+  const passable = new Set([...cells.keys(), ship, ...blocked])
   const [start] = cells.keys()
   const seen = new Set([start])
   const queue = [cells.get(start)]
@@ -70,10 +81,10 @@ export function isConnected(out) {
       queue.push(n)
     }
   }
-  // The ship is a stepping stone, not a member: it does not have to be reached for the colony
-  // to be whole, and it does not count toward what has to be.
-  seen.delete(ship)
-  return seen.size === cells.size
+  // The ship and painted roads are stepping stones, not members: they do not have to be
+  // reached for the colony to be whole, and they do not count toward what has to be.
+  for (const k of cells.keys()) if (!seen.has(k)) return false
+  return true
 }
 
 /** Slide a zone whole. Order is identity here: cells[0] stays the root wherever it lands. */
@@ -104,7 +115,7 @@ export function fits(layout, name, dq, dr) {
   const ship = cellKey(SHIP_CELL.q, SHIP_CELL.r)
   for (const c of moved) {
     const k = cellKey(c.q, c.r)
-    if (k === ship || occupied.has(k)) return false
+    if (k === ship || occupied.has(k) || blocked.has(k)) return false
     if (hexDistance(c, ORIGIN) >= POOL_RINGS) return false
   }
   return true
@@ -153,7 +164,7 @@ export function componentsOf(layout) {
         const k = cellKey(n.q, n.r)
         if (seen.has(k)) continue
         const who = owner.get(k)
-        if (!who && k !== ship) continue
+        if (!who && k !== ship && !blocked.has(k)) continue
         seen.add(k)
         if (who && !placed.has(who)) {
           placed.add(who)

@@ -170,8 +170,10 @@ const cleanPrompt = (s) => stripTags(s).replace(/\s+/g, ' ').trim()
  * Mirrors the CLI's own title precedence: custom > ai > summary > first prompt.
  */
 function readTranscriptMeta(records) {
-  const meta = { customTitle: '', aiTitle: '', summary: '', firstPrompt: '', cwd: '', gitBranch: '', startedAt: 0 }
+  const meta = { customTitle: '', aiTitle: '', summary: '', firstPrompt: '', cwd: '', gitBranch: '', startedAt: 0, model: '' }
   for (const r of records) {
+    // The latest model wins: `/model` can switch it mid-thread.
+    if (r.type === 'assistant' && r.message?.model && r.message.model !== '<synthetic>') meta.model = r.message.model
     if (!meta.customTitle && r.customTitle) meta.customTitle = r.customTitle
     if (!meta.aiTitle && r.aiTitle) meta.aiTitle = r.aiTitle
     if (!meta.summary && r.type === 'summary' && r.summary) meta.summary = r.summary
@@ -286,6 +288,7 @@ async function transcriptMeta(entry) {
       for (const r of jsonLines(await readTail(entry.file, TAIL_BYTES))) {
         if (r.customTitle) meta.customTitle = r.customTitle
         if (r.aiTitle) meta.aiTitle = r.aiTitle
+        if (r.type === 'assistant' && r.message?.model && r.message.model !== '<synthetic>') meta.model = r.message.model
       }
     }
   } catch {
@@ -521,7 +524,7 @@ async function scanThreads() {
       worktree,
       cwd,
       gitBranch: meta?.gitBranch || '',
-      model: s.model || '',
+      model: s.model || meta?.model || '',
       effort: s.effort || '',
       createdAt: num(s.createdAt) || meta?.startedAt || 0,
       // The desktop record's own stamp lags: the app writes it when the thread is focused, so a
@@ -571,7 +574,7 @@ async function scanThreads() {
       worktree,
       cwd,
       gitBranch: meta.gitBranch,
-      model: '',
+      model: meta.model,
       effort: '',
       createdAt: meta.startedAt || entry.mtime,
       lastActivityAt: entry.mtime,
@@ -709,9 +712,16 @@ async function transcriptOf(sessionId) {
   return ''
 }
 
-/** Enough of the end of a transcript for a screenful of conversation, even past big tool output. */
+/**
+ * How much history the popup opens with: your last few turns and everything said in between.
+ * The end of the transcript is read in growing chunks until it holds that many of your messages,
+ * because a busy thread's tail can be megabytes of tool output and screenshots.
+ * ponytail: fixed caps; page further back on scroll if a longer view is ever wanted.
+ */
 const CHAT_TAIL_BYTES = 512 * 1024
-const CHAT_LIMIT = 40
+const CHAT_MAX_BYTES = 64 * 1024 * 1024
+const CHAT_TURNS = 10
+const CHAT_LIMIT = 400
 
 /**
  * The last few turns of a thread, as the chat popup shows them: what you typed, and what Claude
@@ -724,10 +734,24 @@ async function readMessages(ref) {
   const file = await transcriptOf(ref?.cliSessionId)
   if (!file) return { ok: false, error: 'That thread has no transcript on this machine' }
 
+  const { size } = await fsp.stat(file)
+  let messages = []
+  for (let bytes = CHAT_TAIL_BYTES; ; bytes *= 4) {
+    messages = parseMessages(jsonLines(await readTail(file, bytes)))
+    if (bytes >= size || bytes >= CHAT_MAX_BYTES || messages.filter((m) => m.role === 'user').length > CHAT_TURNS) break
+  }
+  // From your CHAT_TURNS-th last message on; with fewer than that, all there is.
+  const users = messages.flatMap((m, i) => (m.role === 'user' ? [i] : []))
+  const from = users.length >= CHAT_TURNS ? users.at(-CHAT_TURNS) : 0
+  return { ok: true, messages: messages.slice(from).slice(-CHAT_LIMIT) }
+}
+
+/** A transcript's records as the popup's messages: yours, and Claude's text and tool calls. */
+function parseMessages(records) {
   const messages = []
   let lastId = ''
-  for (const r of jsonLines(await readTail(file, CHAT_TAIL_BYTES))) {
-    if (r.isSidechain || r.isMeta || !r.message) continue
+  for (const r of records) {
+    if (r.isSidechain || r.isMeta || r.isCompactSummary || !r.message) continue
     const content = r.message.content
     if (r.type === 'user') {
       const parts = typeof content === 'string'
@@ -752,7 +776,7 @@ async function readMessages(ref) {
       else if (part?.type === 'tool_use') msg.tools.push({ name: String(part.name), summary: toolSummary(part.name, part.input) })
     }
   }
-  return { ok: true, messages: messages.filter((m) => m.text || m.tools.length).slice(-CHAT_LIMIT) }
+  return messages.filter((m) => m.text || m.tools.length)
 }
 
 /**

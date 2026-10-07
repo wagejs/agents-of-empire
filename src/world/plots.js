@@ -6,7 +6,7 @@ import { mulberry } from './planet.js'
 import { withCurve } from '../core/curve.js'
 import { OVERLAY_LAYER } from '../core/engine.js'
 import { BUILDING_RADIUS } from './buildings.js'
-import { HEX_DIRS, SHIP_CELL, ORIGIN, POOL_RINGS, cellKey as key, hexDistance, isConnected } from './plot-move.js'
+import { HEX_DIRS, SHIP_CELL, ORIGIN, POOL_RINGS, cellKey as key, hexDistance, isBlocked, isConnected } from './plot-move.js'
 
 /**
  * Project plots — the fenced-off sections of the map, one per repo.
@@ -152,6 +152,9 @@ export function allocateCells(projects, previous = new Map()) {
   return isConnected(laid) ? laid : layOut(projects, new Map())
 }
 
+/** A harness's home folder, as a project: `.claude`, `.codex` and the like. */
+const HUB = /^\.(claude|codex|opencode|gemini)$/
+
 function layOut(projects, previous) {
   const reserved = key(SHIP_CELL.q, SHIP_CELL.r)
   // Shrinking has hysteresis. A zone sitting exactly on a cell boundary would otherwise
@@ -182,14 +185,32 @@ function layOut(projects, previous) {
   for (let ring = 0; (pool.length < total + 30 || ring <= farthest) && ring < POOL_RINGS; ring++) {
     for (const cell of hexRing(ring)) {
       const k = key(cell.q, cell.r)
-      if (k === reserved) continue
+      if (k === reserved || isBlocked(cell.q, cell.r)) continue
       pool.push(cell)
       free.add(k)
     }
   }
 
+  // The agent harness's own home (`~/.claude` and kin) is the colony's heart: it always holds
+  // the middle cell and grows outward from it. Whoever sat there before is reseeded once.
+  const hub = projects.find((p) => HUB.test(p.id))?.id
   const held = new Map()
+  if (hub && free.has(key(ORIGIN.q, ORIGIN.r))) {
+    const before = previous.get(hub)
+    held.set(hub, before?.[0] && hexDistance(before[0], ORIGIN) === 0 ? before : [ORIGIN])
+    free.delete(key(ORIGIN.q, ORIGIN.r))
+  }
   for (const { id, want } of wanted) {
+    if (held.has(id)) {
+      const keep = [{ ...ORIGIN }]
+      for (const cell of held.get(id).slice(1)) {
+        if (keep.length >= want) break
+        if (!free.delete(key(cell.q, cell.r))) continue
+        keep.push({ q: cell.q, r: cell.r })
+      }
+      held.set(id, keep)
+      continue
+    }
     const before = previous.get(id)
     if (!before || !before.length) continue
     // The root cell is the whole point — it is the zone's origin, and everything standing

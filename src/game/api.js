@@ -128,18 +128,21 @@ export const chatPermission = (id, choice, answers) => post('/api/chat/permissio
  * Send one message into a thread. The reply runs on the server, so this only returns its
  * `runId`; `chatAttach` is how the page watches it.
  */
-export const chatSend = (thread, text, mode) =>
-  post('/api/chat/send', { harness: thread.harness, ref: thread.ref, threadId: thread.id, text, mode })
+export const chatSend = (thread, text, mode, model) =>
+  post('/api/chat/send', { harness: thread.harness, ref: thread.ref, threadId: thread.id, text, mode, model })
 
 /**
  * Start a new Claude Code thread in `folder` with its first message. Its run's first event is a
  * `session` carrying the thread, for every message after this one to go to.
  */
-export const chatStart = (folder, text, mode) => post('/api/chat/new', { folder, text, mode })
+export const chatStart = (folder, text, mode, model) => post('/api/chat/new', { folder, text, mode, model })
 
 /** The `/` commands Claude Code offers for a thread, or in the folder of a new one. */
 export const chatCommands = ({ thread, folder }) =>
   post('/api/chat/commands', thread ? { harness: thread.harness, ref: thread.ref } : { folder })
+
+/** Switch a running reply's model. */
+export const chatModel = (runId, model) => post('/api/chat/model', { runId, model })
 
 /** Switch a running reply's permission mode. */
 export const chatMode = (runId, mode) => post('/api/chat/mode', { runId, mode })

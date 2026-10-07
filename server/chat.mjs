@@ -185,8 +185,8 @@ export function eventsOf(msg, block) {
  * A brand new Claude Code thread in `cwd`, started by its first message. Without your own CLI on
  * the machine, the SDK's bundled one starts it instead.
  */
-export async function startChat(cwd, text, mode) {
-  return startRun({ sessionId: '', cwd, bin: await cliBinary(), mode }, text)
+export async function startChat(cwd, text, mode, model) {
+  return startRun({ sessionId: '', cwd, bin: await cliBinary(), mode, model }, text)
 }
 
 /**
@@ -195,6 +195,13 @@ export async function startChat(cwd, text, mode) {
  */
 export const MODES = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'dontAsk']
 export const modeOf = (mode) => (MODES.includes(mode) ? mode : 'default')
+
+/**
+ * The models a chat can pick, as Claude Code's own `--model` aliases, so each always means the
+ * latest of its line. Anything else, '' included, leaves the thread on its default.
+ */
+export const MODELS = ['opus', 'sonnet', 'haiku']
+export const modelOf = (model) => (MODELS.includes(model) ? model : '')
 
 /** Commands per folder, and when they were read: a list this size barely changes. */
 const commandCache = new Map()
@@ -235,6 +242,15 @@ export async function setRunMode(runId, mode) {
   return true
 }
 
+/** Switch a running reply's model. It applies from Claude's next request on. */
+export async function setRunModel(runId, model) {
+  const run = runs.get(runId)
+  if (!run || run.done || !run.session) return false
+  run.model = modelOf(model)
+  await run.session.setModel(run.model || undefined)
+  return true
+}
+
 /**
  * Send `text` into `target.sessionId`, or into a new session in `target.cwd` when there is none.
  * Returns the run at once; the reply happens in the background, recording `session` (a new
@@ -248,6 +264,7 @@ export function startRun(target, text, { query = sdkQuery } = {}) {
     threadId: target.threadId || '',
     prompt: text,
     mode: modeOf(target.mode),
+    model: modelOf(target.model),
     events: [],
     listeners: new Set(),
     pending: new Set(),
@@ -355,6 +372,7 @@ async function drive(run, target, text, query) {
         cwd: target.cwd,
         // Explicit: left unset, a resumed run can start in `auto` and never ask the page at all.
         permissionMode: run.mode,
+        model: run.model || undefined,
         // Lets the page switch to "Allow all" mid-reply; which mode applies is still `run.mode`.
         allowDangerouslySkipPermissions: true,
         // Your own CLI, so the session runs on the same version and login it was started with.
@@ -389,6 +407,8 @@ async function drive(run, target, text, query) {
         idleSince = 0
         clearTimeout(settle)
       }
+      // Which model is replying: the page shows it in the chat's header.
+      if (msg.type === 'system' && msg.subtype === 'init' && msg.model) write({ type: 'model', model: msg.model })
       // A new thread learns its id from the first thing its session says.
       if (!run.sessionId && msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
         const thread = newChatThread(msg.session_id, target.cwd)
@@ -427,7 +447,7 @@ async function drive(run, target, text, query) {
     // into the queue between taking it and this run counting as finished.
     const queued = run.queue.splice(0)
     if (queued.length && run.sessionId) {
-      const next = startRun({ ...target, sessionId: run.sessionId, threadId: run.threadId, mode: run.mode }, queued.join('\n\n'), { query })
+      const next = startRun({ ...target, sessionId: run.sessionId, threadId: run.threadId, mode: run.mode, model: run.model }, queued.join('\n\n'), { query })
       write({ type: 'next', runId: next.id })
     }
     write(ended)

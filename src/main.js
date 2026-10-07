@@ -13,6 +13,7 @@ import { planMove } from './world/plot-move.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
 import { loadSkeletons } from './agents/skeletons.js'
+import { PREVIEW_KEY, loadBoardMap, setBoardMap } from './world/hexboard.js'
 import { TIMES } from './world/sky.js'
 import { CURVE_FULL, bendPoint, installWorldCurve, setCurveView } from './core/curve.js'
 import { Ambience } from './audio/ambience.js'
@@ -1242,12 +1243,21 @@ async function boot() {
       }),
     settle(loadKit()),
     settle(loadCrew()),
+    settle(loadBoardMap(import.meta.env.BASE_URL)),
   ])
   if (kitError || crewError) {
     hud.toast('Could not load the model assets — run `npm run assets`', 'err')
     console.error(kitError || crewError)
   }
   colony.astronauts.setRig(crewRig())
+  // The map editor's live preview: paint in its tab, see it here.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== PREVIEW_KEY) return
+    if (e.newValue) {
+      try { setBoardMap(JSON.parse(e.newValue)) } catch { return }
+      if (colony.planet.board) colony._buildTerrain()
+    } else loadBoardMap(import.meta.env.BASE_URL).then(() => colony.planet.board && colony._buildTerrain())
+  })
   // The skeletons only matter on a skeleton planet, so they load after boot, not before it.
   if (crewRig()) {
     loadSkeletons(crewRig())
