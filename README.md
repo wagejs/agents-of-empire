@@ -1,6 +1,61 @@
 # agents-world
 
-a fork of Bot Crossing
+A fork of Bot Crossing. It adds chat and thread control to the colony.
+
+## Credits
+
+Jarren Rocks ([@jarrenrocks](https://github.com/jarrenrocks)) made Bot Crossing. This fork
+uses Jarren's work as its base: the colony, the bots, the world and the harness adapters. Thank you,
+Jarren. The original project is at [botcrossing.com](https://botcrossing.com).
+
+## What this fork adds
+
+### Chat with a thread
+
+- Select a Claude Code bot. Click **Chat** or push Enter. The chat popup opens.
+- The popup shows the last turns of the thread.
+- The reply shows word by word. The popup shows markdown: headings, lists, code, tables and links.
+- You can select and copy text in the popup.
+- Each tool call shows on one line. Click the line to see the full command.
+- Type `/` to see the commands and skills for the thread.
+- Drag the corner of the popup to change its size. Each thread keeps its size.
+
+### Approvals, questions and modes
+
+- When Claude asks to use a tool, the popup shows **Allow**, **Always allow** and **Deny**.
+- **Always allow** writes the rule to `.claude/settings.local.json` in the project.
+- When Claude asks a question, the popup shows the options. Select an option, or type a different answer.
+- Select a permission mode for each thread: **Ask**, **Plan**, **Auto-edit**, **Allow all** or **Deny**.
+- A change of mode applies to the current reply immediately.
+
+### Replies that continue
+
+- The reply runs on the server, not in the page.
+- If you close the popup, open a different thread or reload the page, the reply continues.
+- After a reload, the popup opens again at the same thread.
+- Background subagents send their results to the same reply.
+- You can send a message while Claude works. The message waits in a queue.
+- When the reply stops, Claude gets all queued messages as one turn.
+- Click **Stop** to stop the reply. The queued messages go immediately.
+
+### Threads
+
+- Click **New conversation** to start a Claude Code thread from the page. Select the repo, or type a folder.
+- Click the title on the thread card to rename the thread. Claude Code gets the new name too.
+- Push ⌥N in the popup to go to the next thread that needs you.
+- Push `/` on the map to search all threads. Archive idle threads, or revive archived threads.
+- Subagents show as small teal bots. They have no actions.
+
+### Status and settings
+
+- The **working** status uses the busy flag that Claude Code writes. An idle thread does not show as working.
+- Long transcripts show their correct title.
+- Click **Save as Mine** to keep your quality settings. Click **Mine** to use them again.
+
+### Safety
+
+- Chat accepts requests only from this computer.
+- Chat uses your own `claude` CLI and its login. Nothing goes to a different service.
 
 **[botcrossing.com](https://botcrossing.com)**
 
@@ -925,6 +980,16 @@ Built by **[Jarren Rocks](https://jarren.rocks)**, mostly as a side effect of bu
 and why a tool for keeping track of a lot of them at once existed in the first place.
 
 ## Licence
+
+This fork uses the [MIT licence](LICENSE), the same as the original project.
+
+- Copyright © 2026 Jarren Rocks, for Bot Crossing.
+- Copyright © 2026 Muhammad Wage Juli Saputra, for the changes in this fork.
+
+The name **Bot Crossing** and new character designs stay with Jarren Rocks. Refer to
+[TRADEMARKS.md](TRADEMARKS.md). This fork uses a different name for this reason.
+
+The text below is the licence note from the original project.
 
 [MIT](LICENSE) © Jarren Rocks. Do what you like with it — including forking it, which
 [CONTRIBUTING.md](CONTRIBUTING.md) explains is a first-class option rather than a last resort.
