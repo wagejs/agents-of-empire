@@ -34,6 +34,14 @@ import { helmetGeometry, visorGeometry, screenGeometry } from './model.js'
 
 const SUIT_TONES = [0xf3f1ec, 0xe8e4dc, 0xf7f4ee, 0xdfe4e8, 0xf1e9df]
 
+/**
+ * A subagent is a smaller bot in a teal suit, the colour of its "Subagent" tag on the card: at
+ * a glance the crew splits into threads and the errands they sent out. Same body and gear, so
+ * it still costs nothing extra to draw.
+ */
+const SUBAGENT_SUIT = 0x6fc4b8
+const SUBAGENT_SIZE = 0.62
+
 /** Trim + eye colour per behaviour. Eyes are pushed past 1.0 so the bloom pass catches them. */
 const AGENT_LOOK = {
   working: { trim: 0x4f9a63, eye: [0.35, 2.5, 1.15] },
@@ -601,7 +609,8 @@ export class Astronauts {
       walkFaceTime: 0,
       walkFaceHold: 0,
       walkPersonality: (hash(entry.id) >>> 0) / 0x100000000,
-      suit: SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length],
+      suit: entry.thread?.parentId ? SUBAGENT_SUIT : SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length],
+      size: entry.thread?.parentId ? SUBAGENT_SIZE : 1,
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
       hop: 0,
@@ -1481,7 +1490,7 @@ export class Astronauts {
       e.set(0, agent.yaw, 0)
       q.setFromEuler(e)
       v.set(agent.pos.x, agent.pos.y, agent.pos.z)
-      root.compose(v, q, one.setScalar(s * CREW_SCALE))
+      root.compose(v, q, one.setScalar(s * CREW_SCALE * agent.size))
       one.setScalar(1)
 
       if (crew) {
@@ -1587,7 +1596,7 @@ export class Astronauts {
 
     for (const agent of this._drawnAgents) {
       if (agent.scale < 0.3 || agent.state === 'gone') continue
-      const scale = agent.scale * CREW_SCALE
+      const scale = agent.scale * CREW_SCALE * agent.size
       this._e.set(0, agent.yaw, 0)
       this._q.setFromEuler(this._e)
       this._m.compose(agent.pos, this._q, this._one.setScalar(scale))
@@ -1599,7 +1608,7 @@ export class Astronauts {
           v.set(0, part.y || 0, 0).applyMatrix4(this._m2).applyMatrix4(this._m)
         } else {
           // Assets still loading: cover the procedural helmet and the ground beneath it.
-          v.set(agent.pos.x, agent.pos.y + (i === 0 ? this.headHeight || 0.75 : 0), agent.pos.z)
+          v.set(agent.pos.x, agent.pos.y + (i === 0 ? (this.headHeight || 0.75) * agent.size : 0), agent.pos.z)
         }
         projectHitPoint(v, part.radius * scale, camera, aspect, body[i])
       }

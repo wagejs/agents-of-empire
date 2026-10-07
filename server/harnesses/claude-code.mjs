@@ -7,7 +7,8 @@
  * written down in `server/harnesses/README.md`.
  *
  * Read-only, without exception. Nothing here writes to Claude Code's files — see the note on
- * archiving in `server/harnesses/README.md`.
+ * archiving in `server/harnesses/README.md`. Chat is the one way a thread grows from the page,
+ * and even then it is Claude Code appending its own transcript — see `server/chat.mjs`.
  *
  * Two stores, deliberately merged rather than picked between:
  *   - the desktop app keeps one JSON record per thread (title, cwd, model, timestamps), and
@@ -158,13 +159,11 @@ function firstText(content) {
   return ''
 }
 
-/** Strip <system-reminder>/<command-*> noise the CLI wraps around prompts. */
-function cleanPrompt(s) {
-  return String(s)
-    .replace(/<([a-z][\w-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+/** Strip <system-reminder>/<command-*> noise the CLI wraps around prompts, keeping newlines. */
+const stripTags = (s) => String(s).replace(/<([a-z][\w-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/g, ' ').trim()
+
+/** The same, flattened onto one line — for titles and previews. */
+const cleanPrompt = (s) => stripTags(s).replace(/\s+/g, ' ').trim()
 
 /**
  * Pull whatever a transcript knows about itself: title, cwd, branch, start time.
@@ -281,6 +280,14 @@ async function transcriptMeta(entry) {
   let meta
   try {
     meta = readTranscriptMeta(jsonLines(await readHead(entry.file, HEAD_BYTES)))
+    // Titles land later than the head of a long transcript: Claude Code names a session a while
+    // in, `/rename` appends, and both are re-appended as it goes on. The tail holds the latest.
+    if (entry.size > HEAD_BYTES) {
+      for (const r of jsonLines(await readTail(entry.file, TAIL_BYTES))) {
+        if (r.customTitle) meta.customTitle = r.customTitle
+        if (r.aiTitle) meta.aiTitle = r.aiTitle
+      }
+    }
   } catch {
     meta = readTranscriptMeta([])
   }
@@ -289,11 +296,13 @@ async function transcriptMeta(entry) {
 }
 
 /**
- * Sessions with a CLI process actually alive right now. The registry keeps files for
- * processes that have exited, so every pid is probed before it counts.
+ * Sessions with a CLI process actually alive right now, each with what that process says it is
+ * doing: `busy`, `idle`, or '' from a CLI that does not say. The registry keeps files for
+ * processes that have exited, so every pid is probed before it counts. Where two processes hold
+ * one session, such as the desktop app's warm one and a chat run from the page, busy wins.
  */
 async function scanLiveSessions() {
-  const live = new Set()
+  const live = new Map()
   for (const file of await listFiles(CLI_LIVE, (n) => n.endsWith('.json'))) {
     let record
     try {
@@ -304,7 +313,8 @@ async function scanLiveSessions() {
     if (!record.sessionId || !record.pid) continue
     try {
       process.kill(record.pid, 0) // signal 0 only tests for existence
-      live.add(record.sessionId)
+      const status = typeof record.status === 'string' ? record.status : ''
+      if (status === 'busy' || !live.has(record.sessionId)) live.set(record.sessionId, status)
     } catch {
       /* process is gone */
     }
@@ -440,6 +450,7 @@ function mergeThread(existing, next) {
     lastFocusedAt: Math.max(existing.lastFocusedAt || 0, next.lastFocusedAt || 0),
     hasError: existing.hasError || next.hasError,
     hasLiveProcess: existing.hasLiveProcess || next.hasLiveProcess,
+    liveStatus: existing.liveStatus === 'busy' ? 'busy' : next.liveStatus || existing.liveStatus,
     starred: existing.starred || next.starred,
     routine: existing.routine || next.routine,
     prState: existing.prState || next.prState,
@@ -457,11 +468,13 @@ function mergeThread(existing, next) {
 function toThread(t) {
   const {
     desktopSessionId, desktopSessionIds, cliSessionId, bridgeSessionId,
-    titled, hasLiveProcess, transcriptFile, recordActivityAt, ...rest
+    titled, hasLiveProcess, liveStatus, transcriptFile, recordActivityAt, ...rest
   } = t
   return {
     ...rest,
     canOpen: isDesktopId(desktopSessionId) || isCliId(cliSessionId),
+    // Chat resumes the CLI session, so it needs one with a transcript to resume.
+    canChat: isCliId(cliSessionId) && Boolean(transcriptFile),
     // The cwd rides along because resuming from a terminal has to happen in the folder the
     // session ran in — the worktree, not the repo root.
     ref: { desktopSessionId, desktopSessionIds, cliSessionId, cwd: t.cwd || '' },
@@ -524,6 +537,7 @@ async function scanThreads() {
       recordActivityAt: num(s.lastActivityAt) || num(s.lastFocusedAt) || num(s.createdAt) || 0,
       lastFocusedAt: num(s.lastFocusedAt),
       hasLiveProcess: live.has(cliSessionId),
+      liveStatus: live.get(cliSessionId) || '',
       hasError: Boolean(s.error),
       starred: s.isStarred === true,
       routine: s.scheduledTaskId || '',
@@ -563,6 +577,7 @@ async function scanThreads() {
       lastActivityAt: entry.mtime,
       lastFocusedAt: 0,
       hasLiveProcess: live.has(id),
+      liveStatus: live.get(id) || '',
       hasError: false,
       starred: false,
       routine: '',
@@ -612,7 +627,10 @@ async function scanThreads() {
     const fresh = now - thread.lastActivityAt < ACTIVE_WINDOW_MS
     const waiting =
       thread.hasLiveProcess && fresh && thread.transcriptFile ? await awaitingReply(thread.transcriptFile) : false
-    thread.running = thread.hasLiveProcess && fresh && !waiting
+    // The process's own word wins. The guess below is for a CLI that keeps no status: it took
+    // a message nobody answered, left behind when a reply was cut off, for a turn still going,
+    // and showed an idle thread as working for up to half an hour.
+    thread.running = thread.liveStatus ? thread.liveStatus === 'busy' : thread.hasLiveProcess && fresh && !waiting
     // A thread that handed the turn back wants you, whether or not the desktop app has ever seen
     // it — the only way a terminal-only thread can ask for anything at all.
     if (waiting) thread.unread = true
@@ -634,13 +652,25 @@ const CLI_DIRS = [
   '/usr/local/bin',
   '/usr/bin',
 ]
-const cliBinary = () => findExecutable('claude', CLI_DIRS)
+export const cliBinary = () => findExecutable('claude', CLI_DIRS)
 
 /**
- * The pid of the live CLI process behind a session, if any. Same registry and same caveat as
- * `scanLiveSessions`: files outlive their pids, so the pid is probed before it counts.
+ * A thread started from the page, as the page needs it before any scan has seen it: the same id
+ * and ref the scan will report, so the popup can keep talking to it and match it up afterwards.
  */
-async function liveSessionPid(sessionId) {
+export const newChatThread = (sessionId, cwd) => ({
+  id: ID(sessionId),
+  harness: 'claude-code',
+  harnessName: 'Claude Code',
+  canChat: true,
+  ref: { cliSessionId: sessionId, cwd },
+})
+
+/**
+ * The registry record of the live CLI process behind a session, if any. Same registry and same
+ * caveat as `scanLiveSessions`: files outlive their pids, so the pid is probed before it counts.
+ */
+async function liveRecord(sessionId) {
   for (const file of await listFiles(CLI_LIVE, (n) => n.endsWith('.json'))) {
     let record
     try {
@@ -651,12 +681,100 @@ async function liveSessionPid(sessionId) {
     if (record.sessionId !== sessionId || !record.pid) continue
     try {
       process.kill(record.pid, 0)
-      return record.pid
+      return record
     } catch {
       /* process is gone */
     }
   }
-  return 0
+  return null
+}
+
+const liveSessionPid = async (sessionId) => (await liveRecord(sessionId))?.pid || 0
+
+/** One line naming what a tool call does — the command, the file, or failing that its input. */
+export function toolSummary(name, input) {
+  const i = input && typeof input === 'object' ? input : {}
+  const s = typeof i.command === 'string' ? i.command : typeof i.file_path === 'string' ? i.file_path : JSON.stringify(i)
+  // Long enough for a real command in full: the page shows one line and expands it on a click.
+  return s.length > 4000 ? `${s.slice(0, 4000)}…` : s
+}
+
+/** Where a session's transcript is. `isCliId` first, so the id can never climb out of its folder. */
+async function transcriptOf(sessionId) {
+  if (!isCliId(sessionId)) return ''
+  for (const dir of await listDirs(CLI_PROJECTS)) {
+    const file = path.join(dir, `${sessionId}.jsonl`)
+    if (await exists(file)) return file
+  }
+  return ''
+}
+
+/** Enough of the end of a transcript for a screenful of conversation, even past big tool output. */
+const CHAT_TAIL_BYTES = 512 * 1024
+const CHAT_LIMIT = 40
+
+/**
+ * The last few turns of a thread, as the chat popup shows them: what you typed, and what Claude
+ * said and ran. Tool results, injected context and subagent traffic are left out.
+ *
+ * The CLI writes one record per content block, so an assistant reply that spoke and then ran
+ * two tools is three records sharing one `message.id` — grouped back into one message here.
+ */
+async function readMessages(ref) {
+  const file = await transcriptOf(ref?.cliSessionId)
+  if (!file) return { ok: false, error: 'That thread has no transcript on this machine' }
+
+  const messages = []
+  let lastId = ''
+  for (const r of jsonLines(await readTail(file, CHAT_TAIL_BYTES))) {
+    if (r.isSidechain || r.isMeta || !r.message) continue
+    const content = r.message.content
+    if (r.type === 'user') {
+      const parts = typeof content === 'string'
+        ? [content]
+        : Array.isArray(content) ? content.filter((p) => p?.type === 'text').map((p) => p.text) : []
+      const text = stripTags(parts.join('\n'))
+      // A tool result has no text part; a slash command is nothing but tags.
+      if (!text || text.startsWith('<')) continue
+      messages.push({ role: 'user', text, tools: [] })
+      lastId = ''
+      continue
+    }
+    if (r.type !== 'assistant' || !Array.isArray(content)) continue
+    const id = r.message.id || r.uuid
+    if (id !== lastId) {
+      messages.push({ role: 'assistant', text: '', tools: [] })
+      lastId = id
+    }
+    const msg = messages.at(-1)
+    for (const part of content) {
+      if (part?.type === 'text' && part.text) msg.text = msg.text ? `${msg.text}\n\n${part.text}` : part.text
+      else if (part?.type === 'tool_use') msg.tools.push({ name: String(part.name), summary: toolSummary(part.name, part.input) })
+    }
+  }
+  return { ok: true, messages: messages.filter((m) => m.text || m.tools.length).slice(-CHAT_LIMIT) }
+}
+
+/**
+ * What the server needs to continue a thread from the page: the session, the folder it runs in,
+ * the CLI to run it with, and whether something else holds it right now.
+ *
+ * ponytail: `status` and `entrypoint` are what the registry holds today, not a documented
+ * contract. Should they go, a live thread only gets the warning and is never treated as mid-turn.
+ */
+async function chatTarget(ref) {
+  const { cliSessionId, cwd } = ref || {}
+  if (!(await transcriptOf(cliSessionId))) return { ok: false, error: 'That thread has no Claude Code session to chat with' }
+  const live = await liveRecord(cliSessionId)
+  return {
+    ok: true,
+    sessionId: cliSessionId,
+    cwd: typeof cwd === 'string' ? cwd : '',
+    bin: await cliBinary(),
+    live: Boolean(live),
+    busy: live?.status === 'busy',
+    where: live ? (live.entrypoint === 'claude-desktop' ? 'the Claude app' : 'a terminal') : '',
+  }
 }
 
 /**
@@ -711,5 +829,7 @@ export default {
   scanThreads,
   openThread,
   newSession,
+  readMessages,
+  chatTarget,
   paths: { DESKTOP_SESSIONS, CLI_PROJECTS, CLI_LIVE },
 }

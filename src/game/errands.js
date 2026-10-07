@@ -45,6 +45,7 @@ export function withErrands(list) {
         // would make a second pass fan it out again.
         subagents: undefined,
         parentId: thread.id,
+        parentTitle: thread.title,
         lastActivityAt: sub.lastActivityAt ?? thread.lastActivityAt,
         // Busy by definition. Never unread — an errand is not the thing asking for you, its
         // parent is, and a `?` over both would double-count the one thread that wants an answer.
@@ -55,8 +56,10 @@ export function withErrands(list) {
         archived: false,
         hasTranscript: false,
         sizeBytes: 0,
-        // Nothing to open: a subagent has no session of its own to resume.
+        // Nothing to open or chat with: a subagent has no session of its own to resume. Its
+        // parent is the one to talk to.
         canOpen: false,
+        canChat: false,
         ref: null,
       })
     }

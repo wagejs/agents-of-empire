@@ -26,7 +26,9 @@ const IS_MAC = /Mac/.test(navigator.platform)
 const IS_WIN = /Win/.test(navigator.platform)
 const FILE_MANAGER = IS_MAC ? 'Finder' : IS_WIN ? 'Explorer' : 'Files'
 
-const ICON = {
+export const ICON = {
+  search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>`,
+  chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.7a8 8 0 0 1-8.5 8 9.3 9.3 0 0 1-2.7-.4L4.5 21l1.4-4.1a7.9 7.9 0 0 1-2.4-5.7A8 8 0 0 1 12 3.6a8 8 0 0 1 8.5 8.1z"/><path d="M8.5 11.7h.01M12 11.7h.01M15.5 11.7h.01"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
   eyeOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19M6.6 6.6C4.06 8.2 2 11 2 11s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24M2 2l20 20"/></svg>`,
@@ -108,18 +110,33 @@ export class Hud {
     const s = this.settings
     this.controls = []
 
-    // Quality presets.
-    body.appendChild(
-      group(
-        'Quality preset',
-        chips(
-          Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, title: p.hint })),
-          () => s.get('preset'),
-          (id) => s.applyPreset(id),
-          this.controls
-        )
+    // Quality presets, and one of your own: save the settings you tuned, come back to them later.
+    const presets = group(
+      'Quality preset',
+      chips(
+        [
+          ...Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, title: p.hint })),
+          { id: 'mine', label: 'Mine', title: 'The settings you saved with "Save as Mine"' },
+        ],
+        () => s.get('preset'),
+        (id) => s.applyPreset(id),
+        this.controls
       )
     )
+    const save = document.createElement('button')
+    save.type = 'button'
+    save.className = 'btn ghost save-preset'
+    save.textContent = 'Save as Mine'
+    save.title = 'Keep the settings below as your own preset'
+    save.addEventListener('click', () => {
+      s.saveMine()
+      this.toast('Saved as your preset, Mine')
+    })
+    presets.appendChild(save)
+    body.appendChild(presets)
+    // "Mine" only does something once there is something saved.
+    const mine = presets.querySelectorAll('.chip')[Object.keys(PRESETS).length]
+    this.controls.push({ el: mine, sync: () => (mine.disabled = !s.get('myPreset')) })
 
     // Performance.
     const perf = group('Performance')
@@ -446,6 +463,7 @@ export class Hud {
     on('#btn-close-settings', 'click', () => this.toggleSettings(false))
     on('#btn-hide', 'click', () => this.toggleUi())
     on('#btn-help', 'click', () => this.toggleHelp())
+    on('#btn-search', 'click', () => this.actions.openSearch?.())
     on('#btn-shot', 'click', () => this.actions.screenshot?.())
     on('#btn-home', 'click', () => this.actions.resetView?.())
     on('#btn-next', 'click', () => this.actions.focusStatus?.('waiting'))
@@ -454,6 +472,7 @@ export class Hud {
     on('#btn-time', 'click', () => this.actions.cycleTime?.())
     on('#btn-sound', 'click', () => this.settings.set('sound', !this.settings.get('sound')))
     on('#btn-open', 'click', () => this.actions.openThread?.())
+    on('.thread-pop .title', 'click', () => this.rename())
     on('#btn-viewed', 'click', () => this.actions.markViewed?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
@@ -683,6 +702,37 @@ export class Hud {
    * one thread and its repo are the same context, and splitting them across the screen made
    * you look in two places to act on one astronaut.
    */
+  /**
+   * The card's title becomes a field. Enter or clicking away keeps the new name, the way a
+   * rename in Finder does; Escape drops it. The id is taken now, so a click that lands on
+   * another bot still renames the one you were typing about.
+   */
+  rename() {
+    if (!this.selected || this.renaming) return
+    const { id, title: current } = this.selected.thread
+    const title = this.$('.thread-pop .title')
+    const input = document.createElement('input')
+    input.className = 'rename'
+    input.value = current || ''
+    input.maxLength = 200
+    input.setAttribute('aria-label', 'Thread name')
+    this.renaming = true
+    title.replaceChildren(input)
+    input.focus()
+    input.select()
+    const finish = (keep) => {
+      if (!this.renaming) return
+      this.renaming = false
+      title.textContent = this.selected?.thread.title || current || 'Untitled thread'
+      if (keep) this.actions.renameThread?.(id, input.value)
+    }
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true)
+      else if (e.key === 'Escape') finish(false)
+    })
+    input.addEventListener('blur', () => finish(true))
+  }
+
   setSelection(agent, thread) {
     const card = this.$('.thread-pop')
     // Only ever one accent button in the panel: whichever action is the immediate one.
@@ -697,7 +747,8 @@ export class Hud {
     // On a phone the card docks above the sheet's peek, so the sheet drops to make room.
     if (this.isPhone()) this.toggleSheet(false)
 
-    this.$('.thread-pop .title').textContent = thread.title || 'Untitled thread'
+    // Every poll lands here; it must not take the field out from under a rename in progress.
+    if (!this.renaming) this.$('.thread-pop .title').textContent = thread.title || 'Untitled thread'
     const status = STATUS_LABEL[agent.status] || agent.status
     const meta = this.$('.thread-pop .meta')
     const bits = [
@@ -710,7 +761,14 @@ export class Hud {
     if (thread.gitBranch) bits.push(`<span class="tag">${escapeHtml(thread.gitBranch)}</span>`)
     if (thread.model) bits.push(`<span class="tag">${escapeHtml(shortModel(thread.model))}</span>`)
     bits.push(`<span>${ago(thread.lastActivityAt)}</span>`)
+    // A subagent says so, and whose it is. It has no session of its own, so none of the thread
+    // actions apply: talk to its parent instead.
+    if (thread.parentId) {
+      const of = thread.parentTitle ? ` of ${escapeHtml(thread.parentTitle.slice(0, 60))}` : ''
+      bits.splice(1, 0, `<span class="tag subagent">Subagent${of}</span>`)
+    }
     meta.innerHTML = bits.join('')
+    this.$('.thread-pop .pair').hidden = Boolean(thread.parentId)
 
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
     this.$('.thread-pop .progress > i').style.width = `${pct}%`
@@ -719,7 +777,13 @@ export class Hud {
     // astronaut needs its size sixty times a second, and asking the layout for it that
     // often is how a HUD starts costing frames.
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
-    this.$('#btn-open').disabled = thread.canOpen === false
+    // A thread that can be continued from here is chatted with rather than opened elsewhere.
+    const open = this.$('#btn-open')
+    open.disabled = thread.canOpen === false
+    open.innerHTML = thread.canChat ? `${ICON.chat} Chat` : `${ICON.open} Open`
+    open.title = thread.canChat
+      ? 'Chat with this thread here (Enter)'
+      : 'Open this thread in the harness it came from (Enter)'
     // Only offered when there is something to dismiss. A third button on every card would
     // crowd the two that are always worth having, and "Viewed" on a thread that is not asking
     // for anything is a control with no effect.
@@ -1067,6 +1131,7 @@ const TEMPLATE = `
   <div class="grab"></div>
   <header class="brandbar">
     <div class="brand"><i class="dot"></i>Bot Crossing</div>
+    <button class="btn icon ghost" id="btn-search" title="Search every thread, archived too (/)">${ICON.search}</button>
     <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
     <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
     <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H)">${ICON.eye}</button>
@@ -1132,7 +1197,7 @@ const TEMPLATE = `
   <div class="top">
     <div class="avatar"><canvas></canvas></div>
     <div class="info">
-      <div class="title"></div>
+      <div class="title" title="Click to rename"></div>
       <div class="meta"></div>
     </div>
     <button class="btn icon ghost" id="btn-follow" title="Follow selected bot" aria-label="Follow selected bot" aria-pressed="false">${ICON.locate}</button>

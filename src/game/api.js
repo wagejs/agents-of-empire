@@ -111,3 +111,68 @@ export const openThread = (thread, via) => post('/api/open', { harness: thread.h
 export const newSession = (folder, harness, via) => post('/api/new-session', { folder, harness, via })
 
 export const revealFolder = (folder) => post('/api/reveal', { folder })
+
+/** A thread's recent conversation, and whether it is open somewhere else right now. */
+export const chatMessages = (thread) => post('/api/chat/messages', { harness: thread.harness, ref: thread.ref })
+
+/** Claude Code's own `/rename`, so `claude --resume` lists the thread under the new name too. */
+export const renameThread = (thread, title) => post('/api/chat/rename', { harness: thread.harness, ref: thread.ref, title })
+
+/**
+ * `choice` is `allow`, `always` or `deny`; the server denies anything else. A question is
+ * answered with `answers` instead, one string per question text, and skipped without.
+ */
+export const chatPermission = (id, choice, answers) => post('/api/chat/permission', { id, choice, answers })
+
+/**
+ * Send one message into a thread. The reply runs on the server, so this only returns its
+ * `runId`; `chatAttach` is how the page watches it.
+ */
+export const chatSend = (thread, text, mode) =>
+  post('/api/chat/send', { harness: thread.harness, ref: thread.ref, threadId: thread.id, text, mode })
+
+/**
+ * Start a new Claude Code thread in `folder` with its first message. Its run's first event is a
+ * `session` carrying the thread, for every message after this one to go to.
+ */
+export const chatStart = (folder, text, mode) => post('/api/chat/new', { folder, text, mode })
+
+/** The `/` commands Claude Code offers for a thread, or in the folder of a new one. */
+export const chatCommands = ({ thread, folder }) =>
+  post('/api/chat/commands', thread ? { harness: thread.harness, ref: thread.ref } : { folder })
+
+/** Switch a running reply's permission mode. */
+export const chatMode = (runId, mode) => post('/api/chat/mode', { runId, mode })
+
+/**
+ * Watch a run from event `from` on, handing each to `onEvent`. Aborting `signal` stops watching
+ * and leaves the reply running. Resolves when the run has finished or the stream drops.
+ */
+export const chatAttach = (runId, from, onEvent, signal) =>
+  streamEvents('/api/chat/attach', { runId, from }, onEvent, signal)
+
+export const chatStop = (runId) => post('/api/chat/stop', { runId })
+
+/** The reply is NDJSON, one event per line, so a tool approval can arrive mid-stream. */
+async function streamEvents(url, payload, onEvent, signal) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw Object.assign(new Error(body.error || `${res.status} ${res.statusText}`), { status: res.status })
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value
+    const lines = buffer.split('\n')
+    buffer = lines.pop()
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line))
+  }
+}

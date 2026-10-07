@@ -6,11 +6,14 @@ import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
+import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
 import {
+  chatTarget,
   defaultHarness,
   harnessStatus,
   newSession as harnessNewSession,
   openThread as harnessOpenThread,
+  readMessages,
   scanThreads,
 } from './scan.mjs'
 
@@ -58,12 +61,16 @@ const emptyState = () => ({
   seen: {},
   hiddenProjects: [],
   viewedAt: {},
+  titles: {},
   settings: null,
   updatedAt: 0,
 })
 
 const asObject = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
 const asArray = (v) => (Array.isArray(v) ? v : [])
+/** Names you gave threads here. Only strings with something in them: the page shows each one. */
+const asTitles = (v) =>
+  Object.fromEntries(Object.entries(asObject(v)).filter(([, t]) => typeof t === 'string' && t.trim()))
 
 async function readState() {
   try {
@@ -77,6 +84,7 @@ async function readState() {
       seen: asObject(raw.seen),
       hiddenProjects: asArray(raw.hiddenProjects).map(String).filter(Boolean),
       viewedAt: asObject(raw.viewedAt),
+      titles: asTitles(raw.titles),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -112,6 +120,7 @@ async function writeState(next) {
     seen: asObject(next.seen),
     hiddenProjects: asArray(next.hiddenProjects).map(String).filter(Boolean),
     viewedAt: asObject(next.viewedAt),
+    titles: asTitles(next.titles),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }
@@ -384,6 +393,126 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
   })
 }
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+const CHAT_MAX = 20_000
+const TITLE_MAX = 200
+
+/**
+ * The calls that act on a Claude Code session through the SDK: starting one, reading it,
+ * sending to it, answering its approvals, renaming it. Chat can run tools on this machine, so it answers this machine
+ * only, even when `BOT_CROSSING_HOST` has put the rest of the colony on the network. The Host
+ * and Origin checks have already run by the time a request gets here.
+ */
+async function chat(pathname, req, res) {
+  if (!LOOPBACK.has(req.socket.remoteAddress)) {
+    return send(res, 403, { error: 'Chat only answers a browser on this machine' })
+  }
+  if (req.method !== 'POST') return send(res, 404, { error: 'Unknown endpoint' })
+  const body = await readJsonBody(req)
+
+  /**
+   * A thread's conversation, and the reply still running in it, if any. That reply's turn is cut
+   * from the transcript's copy, because the page replays it whole from the run instead: showing
+   * both would print every finished block of it twice.
+   */
+  if (pathname === '/api/chat/messages') {
+    const [log, target] = await Promise.all([readMessages(body.harness, body.ref), chatTarget(body.harness, body.ref)])
+    if (!log.ok) return send(res, 400, log)
+    const run = activeRun(target.sessionId)
+    let messages = log.messages
+    if (run) {
+      const at = messages.findLastIndex((m) => m.role === 'user' && m.text === run.prompt)
+      if (at !== -1) messages = messages.slice(0, at)
+    }
+    return send(res, 200, {
+      messages,
+      // While a reply of ours runs, the live process the registry finds is that reply's own
+      // Claude Code: neither a window somewhere else nor somebody else's turn.
+      live: Boolean(target.live) && !run,
+      busy: Boolean(target.busy) && !run,
+      where: target.where || '',
+      run: run ? { id: run.id, prompt: run.prompt } : null,
+    })
+  }
+
+  /** Watch a run from event `from` on. Leaving, by closing this request, leaves the run alone. */
+  if (pathname === '/api/chat/attach') {
+    const run = getRun(String(body.runId || ''))
+    if (!run) return send(res, 404, { ok: false, error: 'That reply has finished' })
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' })
+    const write = (event) => res.destroyed || res.write(`${JSON.stringify(event)}\n`)
+    const leave = attachRun(run, Number(body.from) || 0, write, () => res.end())
+    res.on('close', leave)
+    return
+  }
+
+  /** The `/` commands for a thread, or for the folder a new one will start in. */
+  if (pathname === '/api/chat/commands') {
+    const cwd = body.folder
+      ? await resolveFolder(body.folder)
+      : await resolveFolder((await chatTarget(body.harness, body.ref)).cwd)
+    if (!cwd) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
+    return send(res, 200, { commands: await listCommands(cwd) })
+  }
+
+  /** Change a running reply's permission mode; the next send carries the mode itself. */
+  if (pathname === '/api/chat/mode') {
+    const ok = await setRunMode(String(body.runId || ''), body.mode)
+    return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
+  }
+
+  if (pathname === '/api/chat/stop') {
+    const ok = stopRun(String(body.runId || ''))
+    return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
+  }
+
+  if (pathname === '/api/chat/permission') {
+    const ok = answerPermission(String(body.id || ''), body.choice, body.answers)
+    return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That request was already answered' })
+  }
+
+  if (pathname === '/api/chat/rename') {
+    const title = typeof body.title === 'string' ? body.title.trim() : ''
+    if (!title) return send(res, 400, { ok: false, error: 'A thread needs a name' })
+    if (title.length > TITLE_MAX) return send(res, 400, { ok: false, error: 'That name is too long' })
+    const target = await chatTarget(body.harness, body.ref)
+    if (!target.ok) return send(res, 400, target)
+    await renameThread(target, title)
+    return send(res, 200, { ok: true })
+  }
+
+  if (pathname === '/api/chat/send' || pathname === '/api/chat/new') {
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    if (!text) return send(res, 400, { ok: false, error: 'Nothing to send' })
+    if (text.length > CHAT_MAX) return send(res, 400, { ok: false, error: 'That message is too long' })
+
+    // A new thread needs only a folder that is still there; its first message starts it.
+    if (pathname === '/api/chat/new') {
+      const cwd = await resolveFolder(body.folder)
+      if (!cwd) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
+      return send(res, 200, { runId: (await startChat(cwd, text, modeOf(body.mode))).id })
+    }
+
+    const target = await chatTarget(body.harness, body.ref)
+    if (!target.ok) return send(res, 400, target)
+    const cwd = await resolveFolder(target.cwd)
+    if (!cwd) return send(res, 400, { ok: false, error: 'The folder that thread ran in is not on this machine any more' })
+    // Sent while a reply of ours is running: it waits, and goes as the next turn.
+    const running = activeRun(target.sessionId)
+    if (running) {
+      if (!queueMessage(running, text)) {
+        return send(res, 409, { ok: false, error: 'This reply started before Bot Crossing could queue messages. Wait for it to finish, then send' })
+      }
+      return send(res, 200, { runId: running.id, queued: true })
+    }
+    if (target.busy) return send(res, 409, { ok: false, error: `That thread is mid-turn in ${target.where}. Wait for it to finish` })
+    const threadId = typeof body.threadId === 'string' ? body.threadId : ''
+    return send(res, 200, { runId: startRun({ ...target, cwd, threadId, mode: modeOf(body.mode) }, text).id })
+  }
+
+  return send(res, 404, { error: 'Unknown endpoint' })
+}
+
 /** Connect-style middleware: handles /api/*, passes everything else through. */
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url, 'http://localhost')
@@ -395,7 +524,11 @@ export async function apiMiddleware(req, res, next) {
 
   try {
     if (url.pathname === '/api/threads' && req.method === 'GET') {
-      const threads = await reconcileArchived(await scanThreads())
+      // A thread whose reply is running from the page says so, and whether it waits on you.
+      const threads = (await reconcileArchived(await scanThreads())).map((t) => {
+        const chat = chatStatus(t.id)
+        return chat ? { ...t, chat } : t
+      })
       // A harness that is present but cannot read its own store says so here, rather than
       // appearing healthy in the list while quietly contributing nothing.
       const warnings = (await harnessStatus()).filter((h) => h.detected && h.error).map((h) => h.error)
@@ -456,6 +589,8 @@ export async function apiMiddleware(req, res, next) {
       const shown = await present(await harnessNewSession(harness, dir), viaOf(body))
       return send(res, shown.ok ? 200 : 400, shown)
     }
+
+    if (url.pathname.startsWith('/api/chat/')) return await chat(url.pathname, req, res)
 
     return send(res, 404, { error: 'Unknown endpoint' })
   } catch (err) {

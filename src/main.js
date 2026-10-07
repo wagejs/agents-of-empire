@@ -5,6 +5,8 @@ import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
 import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
+import { Chat, lastChat } from './ui/chat.js'
+import { Search } from './ui/search.js'
 import { PLANETS } from './world/planet.js'
 import { DECK_TOP, PLOT_CELL, hexToWorld, worldToHex } from './world/plots.js'
 import { planMove } from './world/plot-move.js'
@@ -21,6 +23,7 @@ import {
   saveState,
   openThread,
   newSession,
+  renameThread,
   revealFolder,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
@@ -61,7 +64,7 @@ engine.setPlanetGrade(PLANETS[settings.get('planet')]?.grade)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, titles: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -157,6 +160,7 @@ const actions = {
   select: (id) => select(id, {}),
 
   focusThread: (id) => select(id, { fly: true }),
+  openSearch: () => search.open(),
 
   /**
    * A new thread in this repo. The desktop app opens an empty session with the folder as
@@ -169,8 +173,10 @@ const actions = {
       hud.toast('No folder on disk for that project', 'err')
       return
     }
+    const harness = harnessForProject(name)
+    // A Claude Code repo, or one with no threads yet, starts its next thread right here.
+    if (!harness || harness === 'claude-code') return chat.openNew({ folder, name, repos: knownRepos() })
     try {
-      const harness = harnessForProject(name)
       const shown = await newSession(folder, harness, settings.get('openIn'))
       const label = harnessLabel(harness)
       hud.toast(`New thread in ${name} — ${shown.via === 'terminal' ? `${label} in a terminal` : `opening ${label}`}`)
@@ -202,11 +208,31 @@ const actions = {
    */
   markViewed: () => {
     const thread = threads.find((t) => t.id === selectedId)
-    if (!thread) return
-    state.viewedAt = { ...(state.viewedAt || {}), [thread.id]: Date.now() }
+    if (!thread || thread.parentId) return
+    markSeen(thread)
+    hud.toast(`Marked ${thread.title.slice(0, 40)} as viewed`)
+  },
+
+  /**
+   * The name is the colony's own, kept in `data/colony.json` and shown for every harness. A
+   * Claude Code thread is renamed in Claude Code too, so `claude --resume` agrees. Only there:
+   * the desktop app keeps a title of its own, which is why the colony's copy is what it shows.
+   */
+  renameThread: async (id, title) => {
+    const thread = threads.find((t) => t.id === id)
+    const name = String(title || '').trim().slice(0, 200)
+    if (!thread || !name || name === thread.title) return
+    state.titles = { ...(state.titles || {}), [id]: name }
     queueSave()
     applyThreads(threads)
-    hud.toast(`Marked ${thread.title.slice(0, 40)} as viewed`)
+    chat.retitle(id, name)
+    if (!thread.canChat) return hud.toast(`Renamed to ${name.slice(0, 40)}`)
+    try {
+      await renameThread(thread, name)
+      hud.toast(`Renamed to ${name.slice(0, 40)}, here and in Claude Code`)
+    } catch (err) {
+      hud.toast(`Renamed here, but Claude Code kept its old title: ${err.message}`, 'err')
+    }
   },
 
   hideProject: () => {
@@ -248,7 +274,14 @@ const actions = {
 
   openThread: async () => {
     const thread = threads.find((t) => t.id === selectedId)
-    if (!thread) return
+    // A subagent has nothing to open: its parent's thread is the one to talk to.
+    if (!thread || thread.parentId) return
+    // A thread that can be talked to right here is; everything else goes back to its harness.
+    if (thread.canChat) {
+      chat.open(thread)
+      markSeen(thread)
+      return
+    }
     try {
       const shown = await openThread(thread, settings.get('openIn'))
       colony.astronauts.celebrate(thread.id)
@@ -266,7 +299,7 @@ const actions = {
   // `reconcileArchived` in server/api.mjs for why that stopped being worth doing.
   archiveThread: () => {
     const thread = threads.find((t) => t.id === selectedId)
-    if (!thread) return
+    if (!thread || thread.parentId) return
     const foldedBefore = new Set(colony.dormantProjects || [])
     state.archived = [...new Set([...state.archived, thread.id])]
     state.archivedAt = { ...state.archivedAt, [thread.id]: Date.now() }
@@ -306,6 +339,137 @@ ambience.setPlanet(colony.planet)
 colony.onSound = (name, x, y, z) => ambience.play(name, { x, y, z, kind: colony.fauna.flock?.kind })
 
 const hud = new Hud(app, settings, actions)
+
+/**
+ * A reply moves its thread on, so the colony is refreshed once each one ends. A reply you just
+ * watched arrive is not asking for you, so the thread is marked seen again, after the refresh,
+ * because it is the refresh that learns how far the thread moved.
+ */
+const chat = new Chat(hud.el, {
+  // A new thread that never got as far as starting comes back as null: refresh, nothing to mark.
+  onDone: async (thread) => {
+    await poll()
+    if (thread && chat.isOpen && chat.thread?.id === thread.id) markSeen(thread)
+  },
+  needYou: needYouThreads,
+  go: (thread) => {
+    select(thread.id, { fly: true })
+    chat.open(thread)
+    markSeen(thread)
+  },
+})
+
+/** Every repo the colony has seen a thread in, archived and hidden ones too, newest first. */
+function knownRepos() {
+  const latest = new Map()
+  for (const t of threads) {
+    if (!t.projectPath || t.parentId) continue
+    const seen = latest.get(t.projectPath)
+    if (!seen || t.lastActivityAt > seen.at) latest.set(t.projectPath, { name: t.project, path: t.projectPath, at: t.lastActivityAt })
+  }
+  return [...latest.values()].sort((a, b) => b.at - a.at)
+}
+
+/** What the "need you" count counts, as threads the chat can open: the newest first. */
+function needYouThreads() {
+  const waiting = new Set(colony.astronauts.agents.filter((a) => a.status === 'waiting').map((a) => a.id))
+  return threads.filter((t) => t.canChat && waiting.has(t.id)).sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+}
+
+const search = new Search(hud.el, {
+  rows: searchRows,
+  actions: {
+    go: (thread) => select(thread.id, { fly: true }),
+    chat: (thread) => {
+      chat.open(thread)
+      markSeen(thread)
+    },
+    archive: (ids) => setArchived(ids, true),
+    revive: (ids) => setArchived(ids, false),
+  },
+})
+
+/** Every thread the scan knows, errands aside, with what the search panel needs to show it. */
+function searchRows() {
+  const colonyArchived = new Set(state.archived)
+  const now = Date.now()
+  return threads
+    .filter((t) => !t.parentId)
+    .map((t) => {
+      const status = statusFor(t, now)
+      // Only the colony's own archive can be undone here; one made in the harness's app is its to undo.
+      const revivable = colonyArchived.has(t.id)
+      return {
+        thread: t,
+        statusLabel: STATUS_LABEL[status] || status,
+        idle: status === 'idle' || status === 'sleeping',
+        archived: revivable || Boolean(t.archived),
+        revivable,
+        onMap: Boolean(colony.agentFor(t.id)),
+      }
+    })
+}
+
+/**
+ * Archive or revive a batch. Both are the colony's own list and nothing else, so either is
+ * undone by the other.
+ */
+function setArchived(ids, archived) {
+  const list = new Set(state.archived)
+  const at = { ...state.archivedAt }
+  for (const id of ids) {
+    if (archived) {
+      list.add(id)
+      at[id] = Date.now()
+    } else {
+      list.delete(id)
+      delete at[id]
+    }
+  }
+  state.archived = [...list]
+  state.archivedAt = at
+  // The last scan stamped these archived from the old list; until the next one, say otherwise.
+  if (!archived) {
+    const back = new Set(ids)
+    threads = threads.map((t) => (back.has(t.id) ? { ...t, archived: false } : t))
+  }
+  queueSave()
+  if (archived && ids.includes(selectedId)) select(null, {})
+  applyThreads(threads)
+
+  if (archived) {
+    hud.toast(`Archived ${ids.length === 1 ? 'that thread' : `${ids.length} threads`}. Revive them from search (/)`)
+    colony.ship.ping()
+    return
+  }
+  const offMap = ids.filter((id) => !colony.agentFor(id)).length
+  hud.toast(
+    offMap
+      ? 'Revived. Its repo is folded away as quiet or hidden, so chat with it from search until it wakes up'
+      : 'Revived, back on the map'
+  )
+}
+
+/**
+ * The chat this tab had open before it reloaded comes back, once, as soon as the threads are in.
+ * A reload is usually the dev server picking up an edit, and should not cost you your place.
+ */
+let chatRestored = false
+function restoreChat() {
+  if (chatRestored) return
+  chatRestored = true
+  const id = lastChat()
+  const thread = id && threads.find((t) => t.id === id)
+  if (thread?.canChat) chat.open(thread)
+}
+
+/** You looked at it: the thread stops asking for you until it moves on again. */
+function markSeen(thread) {
+  state.viewedAt = { ...(state.viewedAt || {}), [thread.id]: Date.now() }
+  queueSave()
+  applyThreads(threads)
+  chat.refreshNeedYou()
+}
 
 // ── selection ─────────────────────────────────────────────────────────────────────────
 
@@ -458,7 +622,7 @@ function syncProject() {
  */
 const cardAnchor = new THREE.Vector3()
 function screenOf(agent) {
-  bendPoint(cardAnchor.set(agent.pos.x, agent.pos.y + 0.95, agent.pos.z)).project(engine.camera)
+  bendPoint(cardAnchor.set(agent.pos.x, agent.pos.y + 0.95 * (agent.size ?? 1), agent.pos.z)).project(engine.camera)
   if (cardAnchor.z > 1) return null
   const { w, h } = engine.viewport
   return { x: (cardAnchor.x * 0.5 + 0.5) * w, y: (-cardAnchor.y * 0.5 + 0.5) * h }
@@ -791,6 +955,12 @@ window.addEventListener('keydown', (e) => {
   // Never steal keys from a field the user is actually typing in.
   const t = e.target
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return
+  // Nor while chatting: with focus on one of its buttons, Enter would also open the app and A
+  // would archive the very thread being talked to.
+  if (chat.isOpen || search.isOpen) {
+    if (e.key === 'Escape') (chat.isOpen ? chat : search).close()
+    return
+  }
 
   // ⌘\ (⌃\ elsewhere) dismisses the chrome, the same as H — the shortcut every editor
   // uses for its sidebar, and the one hand that is already on the keyboard.
@@ -857,6 +1027,10 @@ window.addEventListener('keydown', (e) => {
     case '?':
       hud.toggleHelp()
       break
+    case '/':
+      e.preventDefault()
+      search.open()
+      break
     // Arrow keys nudge the view and +/- zoom, the same as Earth's keyboard.
     case 'ArrowUp':
     case 'ArrowDown':
@@ -911,12 +1085,20 @@ function applyThreads(list) {
   }
   list = withErrands(list)
 
-  // A thread you have said you looked at stops counting as unread until it moves on again.
-  // Done here rather than in `statusFor` so the card, the badge and the astronaut all agree.
+  // A thread you have said you looked at stops counting as unread until it moves on again,
+  // and one you named is called that. Both done here so the card, the list, search, the badge
+  // and the astronaut all agree.
   const viewed = state.viewedAt || {}
+  const titles = state.titles || {}
   threads = list.map((t) => {
     const at = viewed[t.id]
-    return at && t.lastActivityAt <= at ? { ...t, unread: false } : t
+    const named = titles[t.id] ? { ...t, title: titles[t.id] } : t
+    const seen = at && t.lastActivityAt <= at ? { ...named, unread: false } : named
+    // A reply running from the chat is work, whatever the process registry says, and one
+    // waiting on Allow / Deny wants you, however recently you looked.
+    if (t.chat === 'approval') return { ...seen, running: false, unread: true }
+    if (t.chat === 'running') return { ...seen, running: true }
+    return seen
   })
   list = threads
   const archivedSet = new Set(state.archived)
@@ -956,6 +1138,7 @@ function applyThreads(list) {
   }
   // Which also repaints the legend, so the open zone's chip is lit by the same pass.
   syncProject()
+  search.render()
 
   // Zones only move when their own footprint changes, and when one does the colony file
   // learns about it — so the map you built up a memory of survives a reload.
@@ -1004,6 +1187,8 @@ async function poll() {
     const res = await fetchThreads()
     applyThreads(res.threads || [])
     hud.removeBoot()
+    restoreChat()
+    chat.refreshNeedYou()
   } catch (err) {
     hud.toast(err.message || 'Could not reach the thread scanner', 'err')
     hud.removeBoot()

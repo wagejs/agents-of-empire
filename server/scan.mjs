@@ -128,3 +128,14 @@ const dispatch = (harnessId) => {
 export const openThread = async (harnessId, ref) => dispatch(harnessId).openThread(ref)
 
 export const newSession = async (harnessId, dir) => dispatch(harnessId).newSession(dir)
+
+/** Chat is optional: only an adapter that can show and continue a thread offers it. */
+const chatOf = (harnessId) => {
+  const h = dispatch(harnessId)
+  if (!h.readMessages || !h.chatTarget) throw new Error(`${h.name} threads can't be chatted with here`)
+  return h
+}
+
+export const readMessages = async (harnessId, ref) => chatOf(harnessId).readMessages(ref)
+
+export const chatTarget = async (harnessId, ref) => chatOf(harnessId).chatTarget(ref)

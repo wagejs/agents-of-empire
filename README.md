@@ -7,8 +7,9 @@ a plot for their repo, and build something. When one needs you it stops and hold
 its head; click it and the thread opens back in whichever harness it came from.
 
 It reads the harness's own files, on your own machine. Nothing is uploaded, there is no
-account, and **it never writes to a harness at all** — `data/colony.json`, where the map lives,
-is the only file it writes anywhere.
+account, and **it never writes to a harness itself** — `data/colony.json`, where the map lives,
+is the only file it writes anywhere. The one way a thread changes from here is
+[Chat](#clicking-one), and then it is Claude Code appending your message to its own transcript.
 
 > **Status:** published as-is. I built this for myself and cannot promise to maintain it —
 > issues and PRs are welcome but may go unanswered, and forking is an entirely reasonable
@@ -190,10 +191,11 @@ into the same repo. Picking somebody is also picking the zone they are standing 
 
 **The repo**, at the top, whether or not anybody is selected:
 
-- **New conversation** (`C`) starts a fresh thread in that folder. It is the same
-  `claude://code/new?folder=…` deep link Finder's "New Claude Code Session Here" quick
-  action uses, so the desktop app opens an empty session with the repo as its workspace —
-  nothing is resumed and nothing is written.
+- **New conversation** (`C`) starts a fresh thread in that folder, right here. In a Claude Code
+  repo, or one with no threads yet, it opens an empty chat: your first message starts a new
+  Claude Code session in the folder, and from then on it is a chat like any other. Its bot walks
+  out of the ship on the next scan. A repo whose threads belong to another harness opens that
+  harness's app instead, through its own new-session deep link.
 - **Finder** (Explorer on Windows) opens the folder, **Copy path** copies it.
 - Underneath, everything running in that repo, whoever wants something first. Clicking one
   flies to its bot and selects it.
@@ -211,12 +213,38 @@ working bot rarely stands still long enough to be watched otherwise. Panning, or
 all still work while it follows; deselecting stops it, and the crosshair on the card turns it off
 for good if you would rather the view stayed put.
 
-- **Open** hands the thread back to whichever harness owns it and its app comes forward. On a
+- **Open** (`Enter`) hands the thread back to whichever harness owns it and its app comes forward. On a
   Linux box with no desktop app to answer the deep link, a terminal opens with the CLI resuming
   the session instead.
   *Open threads in: Terminal*, in settings, asks for that every time, on any of the three. On Windows a
   thread that is already running in a terminal gets that window fronted instead of a second copy of
   itself imported into the desktop app.
+- **Chat** (`Enter`) takes Open's place on a Claude Code thread, and talks to it without leaving
+  the colony. A popup shows the last few turns and continues the *same* session through the
+  [Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), using your own `claude` CLI and
+  its login. Opening it counts as having looked, so the thread's hand goes down, and a reply you
+  watch arrive does not put it back up. Anything Claude wants to run that your settings do not
+  already allow comes up as Allow / Deny in the popup. Where Claude Code suggests a rule,
+  *Always allow* saves it to the project's `.claude/settings.local.json`, so a terminal or the
+  app stops asking too. A thread that is mid-turn elsewhere cannot be sent to. One that is
+  merely open in the app or a terminal can, but that window will not see the new turns until
+  the thread is reopened there. A reply runs on the server, not in the popup: closing it,
+  opening another thread's chat, or reloading the page only stops you watching. Its bot keeps
+  working, raises its `?` if it needs an Allow / Deny, and reopening the thread picks the reply up
+  with everything it said meanwhile. A reload reopens the chat you had open. Only Stop ends one. You can keep typing while
+  Claude works: those messages queue under the reply and go together as the next turn once it
+  finishes. Stop ends the reply and sends the queue at once, which is how you interrupt and redirect.
+- **Search** (`/`, or the magnifier in the sidebar) finds any thread on this machine: the ones
+  on the map, the ones archived, and the ones in repos hidden or folded away. Every word you type
+  has to match its title, first prompt, repo, path, branch, worktree, harness, model or status.
+  From a result, **Go** flies to its bot, **Chat** talks to it even while it is off the map, and
+  **Archive** / **Revive** move it in and out of the colony's archive. **Archive idle** retires
+  every idle or dormant thread at once, after asking. A thread archived in its harness's own app
+  shows up here too, but only that app can bring it back.
+- **Rename** by clicking the title on the card. Enter or clicking away keeps it, Escape drops it.
+  The name lives in `data/colony.json` and shows everywhere in the colony, for every harness. A
+  Claude Code thread is renamed in Claude Code too, the way `/rename` does it, so
+  `claude --resume` lists it under the new name. The desktop app keeps its own title.
 - **Viewed** (`V`), on a thread that is asking for you, puts its hand down. The harness only
   counts a thread as read once it has been focused in its own app, so one you answered in a
   terminal waves for good. This records when you looked, and the thread starts asking again the
@@ -783,6 +811,8 @@ more interesting target than a localhost toy usually is. Three things hold it in
   without this any page you happened to have open could POST here — spawning sessions, opening
   Finder windows, or overwriting the colony layout — even while unable to read the response.
   Requests from anywhere but this server's own page are refused.
+- **Chat answers loopback only.** It can run tools on this machine, so `/api/chat/*` refuses
+  any connection that is not from `127.0.0.1` itself, whatever the server is bound to.
 
 The practical cost: a bare `curl` POST is refused too, since browsers always send `Origin` on
 POST and its absence means the caller is not the page. Add `-H 'Origin: http://localhost:5274'`
@@ -802,7 +832,8 @@ driving the server; they are not access control, and they do nothing about anoth
 directly. Anyone who can reach the port gets every thread title, every opening prompt, every
 working directory and branch — a fairly complete picture of what you have been working on — plus
 the ability to open threads, reveal folders and start sessions on your machine. There is no
-password, because there was never meant to be anything to guard.
+password, because there was never meant to be anything to guard. Chat is the exception: it stays
+on the machine itself, so the tablet can watch but not talk.
 
 Fine on a network you own. Not something to leave running on café wifi, and worth remembering
 that a machine on a VPN or a mesh network is reachable by everything else on it too.

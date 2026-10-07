@@ -216,7 +216,7 @@ export class Indicators {
       centers[n * 3] = agent.pos.x
       // Just clear of the helmet: the shader lifts the quad the rest of the way by its own
       // half-height, which is the part that has to change with the camera.
-      centers[n * 3 + 1] = agent.pos.y + HEAD_CLEAR + bob
+      centers[n * 3 + 1] = agent.pos.y + HEAD_CLEAR * (agent.size ?? 1) + bob
       centers[n * 3 + 2] = agent.pos.z
 
       frames[n * 2] = (badge % COLS) / COLS

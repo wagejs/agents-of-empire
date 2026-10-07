@@ -184,3 +184,18 @@ test('viewedAt is carried through the v1 migration with the ids it keys on', asy
     assert.deepEqual(Object.keys(state.viewedAt), [`claude-code:${id}`])
   })
 })
+
+// ── names ────────────────────────────────────────────────────────────────────
+
+test('a name given in one tab survives a save from another', () => {
+  const merged = mergeState({ titles: {} }, { titles: { a: 'Mine' } }, { titles: { b: 'Theirs' } })
+  assert.deepEqual(merged.titles, { a: 'Mine', b: 'Theirs' })
+})
+
+test('names are saved, and only the ones the page can show', async () => {
+  await withServer(async ({ call, put }) => {
+    await put({ titles: { a: 'Auth rewrite', b: '   ', c: 42, d: { html: true } } })
+    const state = await (await call('/api/state')).json()
+    assert.deepEqual(state.titles, { a: 'Auth rewrite' })
+  })
+})

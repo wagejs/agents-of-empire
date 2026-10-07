@@ -12,6 +12,12 @@ const api = () => ({
 export default defineConfig({
   plugins: [api()],
   // PORT lets a second copy run alongside the first without a flag on the command line.
-  server: { port: Number(process.env.PORT) || 5274, strictPort: false },
+  server: {
+    port: Number(process.env.PORT) || 5274,
+    strictPort: false,
+    // Claude Code keeps worktrees inside the repo. Another session editing one is not this page
+    // changing, and reloading for it interrupts whatever you were doing here.
+    watch: { ignored: ['**/.claude/worktrees/**'] },
+  },
   build: { target: 'esnext' },
 })

@@ -90,14 +90,14 @@ body {
    rectangles flickering where the sidebar and settings would be. `visibility: hidden`
    takes them out of compositing entirely; its transition is delayed so the fade still
    plays, and on the way back it is immediate so the fade-in has something to fade. */
-.hud.hidden > :not(.thread-pop) {
+.hud.hidden > :not(.thread-pop):not(.chat) {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
   transition: opacity 220ms ease, visibility 0s linear 220ms !important;
 }
 
-.hud.hidden > :not(.thread-pop) * {
+.hud.hidden > :not(.thread-pop):not(.chat) * {
   pointer-events: none !important;
 }
 
@@ -569,7 +569,19 @@ body {
   gap: 5px;
 }
 
+.thread-pop .title input.rename {
+  width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
 .thread-pop .title {
+  cursor: text;
   font-size: 13.5px;
   font-weight: 600;
   line-height: 1.25;
@@ -631,6 +643,33 @@ body {
   flex: 1;
   min-width: 0;
   height: 34px;
+}
+
+.settings .save-preset {
+  margin-top: 8px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.settings .chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* A subagent's card: no actions, and a tag saying whose it is. */
+.thread-pop .pair[hidden] {
+  display: none;
+}
+
+.thread-pop .tag.subagent {
+  color: var(--teal);
+  border-color: rgba(47, 212, 196, 0.35);
+}
+
+/* `.btn` sets its own display, which would otherwise outrank the attribute. */
+.thread-pop .pair .btn[hidden],
+.chat [hidden] {
+  display: none;
 }
 
 .progress {
@@ -1220,6 +1259,561 @@ body {
 .fps b {
   color: var(--text);
   font-weight: 600;
+}
+
+/* ── chat ────────────────────────────────────────────────────────────────────────── */
+
+.chat {
+  z-index: 4;
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgba(6, 7, 11, 0.55);
+  pointer-events: auto;
+}
+
+.chat.open {
+  display: grid;
+}
+
+.chat .sheet {
+  width: min(640px, calc(100vw - 24px));
+  height: min(720px, calc(100dvh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Drag the bottom-right corner to resize the chat. It stays centred, so it grows both ways. */
+.chat:not(.search) .sheet {
+  resize: both;
+  min-width: min(360px, calc(100vw - 24px));
+  min-height: min(320px, calc(100dvh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-head .info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-head .title {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-head .repo-pick {
+  margin-top: 4px;
+  max-width: 100%;
+  height: 26px;
+  font-size: 12px;
+}
+
+.chat-head .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-note {
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--amber);
+  background: rgba(201, 162, 79, 0.08);
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-note.err {
+  color: var(--red);
+}
+
+/* The page is a game and selects nothing; a conversation has to be selectable and copyable. */
+.chat:not(.search) :is(.chat-log, .chat-head .info) {
+  user-select: text;
+}
+
+.chat:not(.search) .chat-log button {
+  user-select: none;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat .msg {
+  max-width: 88%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat .msg.user {
+  align-self: flex-end;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: rgba(201, 100, 66, 0.18);
+  border: 1px solid rgba(201, 100, 66, 0.35);
+}
+
+/* Sent while Claude was working: it goes once the current reply finishes. */
+.chat .msg.user.queued {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.chat .msg.user.queued::after {
+  content: 'Queued, goes when this reply finishes';
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat .msg.assistant {
+  align-self: flex-start;
+}
+
+.chat .msg .text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat .md {
+  overflow-wrap: anywhere;
+}
+
+.chat .md > :first-child {
+  margin-top: 0;
+}
+
+.chat .md > :last-child {
+  margin-bottom: 0;
+}
+
+/* Claude breaks lines on purpose, so a single newline stays a newline. */
+.chat .md p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.chat .md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 12px 0 6px;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.chat .md h1 {
+  font-size: 15px;
+}
+
+.chat .md h2 {
+  font-size: 14px;
+}
+
+.chat .md :is(ul, ol) {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.chat .md li > :is(p, ul, ol) {
+  margin: 0;
+}
+
+.chat .md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat .md pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.chat .md pre code {
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
+
+.chat .md blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--muted);
+}
+
+/* A wide table scrolls inside the reply rather than widening the popup. */
+.chat .md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.chat .md :is(th, td) {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.chat .md th {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat .md a {
+  color: #ffb193;
+}
+
+.chat .md hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.chat .msg .tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* Opened: the whole command, wrapped, on a faint panel so it reads as one block. */
+.chat .msg .tool.open {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.chat .msg .err {
+  color: var(--red);
+  font-size: 12px;
+}
+
+.chat .perm {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(201, 162, 79, 0.45);
+  background: rgba(201, 162, 79, 0.08);
+}
+
+.chat .perm-q {
+  font-weight: 600;
+}
+
+.chat .perm pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 6px 0 8px;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat .perm .pair {
+  display: flex;
+  gap: 6px;
+}
+
+/* Claude's questions: options as buttons, the picked one lit, and room to type your own. */
+.chat .question .perm-q {
+  white-space: pre-wrap;
+}
+
+.chat .ask {
+  margin: 10px 0;
+}
+
+.chat .ask-head {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat .ask-q {
+  margin: 2px 0 6px;
+}
+
+.chat .ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat .ask-option {
+  height: auto;
+  padding: 6px 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 2px;
+}
+
+.chat .ask-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: normal;
+}
+
+.chat .ask-other {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.chat .question.answered .ask {
+  display: none;
+}
+
+.chat .perm-rule {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.chat .perm.answered pre,
+.chat .perm.answered .pair,
+.chat .perm.answered .perm-rule {
+  display: none;
+}
+
+.chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* The / menu: rises out of the message box, newest-typed filter applied. */
+.chat-form {
+  position: relative;
+}
+
+.chat .slash-menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 4px);
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  z-index: 2;
+}
+
+.chat .slash-item {
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.chat .slash-item[aria-selected='true'],
+.chat .slash-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat .slash-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.chat .slash-desc,
+.chat .slash-empty {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat .slash-empty {
+  padding: 6px 10px;
+}
+
+.chat-form .mode-pick {
+  height: 40px;
+  font-size: 12px;
+}
+
+/* "Allow all" runs anything without asking: it should look like it. */
+.chat-form .mode-pick.risky {
+  border-color: rgba(201, 79, 79, 0.6);
+  color: #ffb4a8;
+}
+
+.chat-form textarea {
+  flex: 1;
+  resize: none;
+  min-height: 40px;
+  max-height: 160px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.chat-form textarea:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.chat-form textarea:disabled {
+  opacity: 0.5;
+}
+
+/* ── search ──────────────────────────────────────────────────────────────────────── */
+
+/* Shares the chat's modal and sheet; only the body is its own. */
+.search .search-box {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search .search-box:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.search-bar .btn {
+  height: 30px;
+  font-size: 12px;
+}
+
+.search-bar .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.search-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.search-row.archived .info {
+  opacity: 0.6;
+}
+
+.search-row .info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-row .title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-row :is(.meta, .preview) {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-row .pair {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.search-row .btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.search-empty {
+  padding: 18px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
 }
 
 /* ── help ────────────────────────────────────────────────────────────────────────── */

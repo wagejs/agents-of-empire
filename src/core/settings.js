@@ -144,6 +144,8 @@ export const MAX_AGENT_CAP = Math.max(...Object.values(PRESETS).map((p) => p.val
 
 const DEFAULTS = {
   preset: 'balanced',
+  /** Your own preset: the quality settings as they were when you saved them, or null. */
+  myPreset: null,
   ...PRESETS.balanced.values,
 
   // World
@@ -222,6 +224,9 @@ const RENDER_KEYS = new Set([
   'ambientOcclusion',
 ])
 
+/** Every setting some preset decides: what a preset of your own captures. */
+const PRESET_KEYS = [...new Set(Object.values(PRESETS).flatMap((p) => Object.keys(p.values)))]
+
 export class Settings {
   constructor() {
     const stored = load()
@@ -245,26 +250,42 @@ export class Settings {
     return this.values[key]
   }
 
+  /** A preset's values: a built-in one, or `mine` once you have saved it. */
+  presetValues(name) {
+    if (name === 'mine') return this.values.myPreset || null
+    return PRESETS[name]?.values || null
+  }
+
   /** True when `key` currently differs from what the active preset specifies. */
   isOverridden(key) {
-    const preset = PRESETS[this.values.preset]
-    return Boolean(preset && key in preset.values && preset.values[key] !== this.values[key])
+    const preset = this.presetValues(this.values.preset)
+    return Boolean(preset && key in preset && preset[key] !== this.values[key])
   }
 
   set(key, value) {
     if (this.values[key] === value) return
     this.values[key] = value
     // Touching any quality knob directly means you are no longer on a named preset.
-    const preset = PRESETS[this.values.preset]
-    if (preset && key in preset.values) this.values.preset = 'custom'
+    const preset = this.presetValues(this.values.preset)
+    if (preset && key in preset) this.values.preset = 'custom'
     this._emit([key])
   }
 
+  /**
+   * Keep the quality settings as they are now as your own preset, `mine`, to come back to after
+   * trying a built-in one. It is saved with the rest of the settings, so it survives reloads.
+   */
+  saveMine() {
+    this.values.myPreset = Object.fromEntries(PRESET_KEYS.map((k) => [k, this.values[k]]))
+    this.values.preset = 'mine'
+    this._emit(['myPreset', 'preset'])
+  }
+
   applyPreset(name) {
-    const preset = PRESETS[name]
+    const preset = this.presetValues(name)
     if (!preset) return
     const changed = []
-    for (const [k, v] of Object.entries(preset.values)) {
+    for (const [k, v] of Object.entries(preset)) {
       if (this.values[k] !== v) {
         this.values[k] = v
         changed.push(k)

@@ -20,6 +20,9 @@ export default {
   scanThreads,                   // () => Promise<Thread[]>
   openThread,                    // (ref) => { ok, url, command? } | { ok: false, error }
   newSession,                    // (dir) => { ok, url, command? } | { ok: false, error }
+  // Optional, both or neither: the chat popup. Only Claude Code has them today.
+  readMessages,                  // (ref) => { ok, messages: [{ role, text, tools }] } | { ok: false, error }
+  chatTarget,                    // (ref) => { ok, sessionId, cwd, bin, live, busy, where } | { ok: false, error }
 }
 ```
 
@@ -117,6 +120,8 @@ Do not put a file handle, a class instance, or a secret in it.
 - **Read-only. No exceptions.** `data/colony.json` is the only file Bot Crossing writes,
   anywhere. A harness's transcripts and records are somebody's actual work; the colony is a
   viewer, not an editor. If an adapter seems to need a write, it does not — say so in an issue.
+  Chat does not break this: the adapter only reads, and the turn is appended by Claude Code
+  itself, through the Agent SDK in `server/chat.mjs`.
 - **Never run anything out of another application's bundle.** Not to read from it, not to
   execute it. Only files under the user's own home directory. Opening a thread goes through a
   URL the OS resolves, or a command the user already has on `PATH`.
