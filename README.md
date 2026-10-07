@@ -77,7 +77,18 @@ The server listens only on `127.0.0.1`. Chat accepts requests only from this com
 - Long transcripts show their correct title.
 - Click **Save as Mine** to keep your quality settings. Click **Mine** to use them again.
 
-### Safety
+### Medieval planet
+
+- Push Tab to change the planet. **Medieval** is after Terra.
+- The colony is an island of KayKit hex tiles in the sea. Each plot stands on grass tiles.
+- A road goes around the town. A river goes across the island to the sea. Trees, rocks, hills and mountains stand on the outer tiles.
+- The bots come out of a castle, not a spaceship.
+- The bots are skeletons. A subagent is a Minion. A main thread is a Rogue, a Warrior or a Mage. The same thread always gets the same skeleton.
+- The eyes of a skeleton show the status colour.
+- The building of a thread grows from scaffolding to a full building. The colour of the building shows the status. An idle building is grey.
+- A thread that runs for a long time gets a church, a windmill or a great tower.
+- In **Settings → Planet**, select **Start on** to open the page on the same planet each time.
+
 
 - Chat accepts requests only from this computer.
 - Chat uses your own `claude` CLI and its login. Nothing goes to a different service.
@@ -92,7 +103,8 @@ This fork uses the [MIT licence](LICENSE), the same as the original project.
 The name **Bot Crossing** and new character designs stay with Jarren Rocks. Refer to
 [TRADEMARKS.md](TRADEMARKS.md). This fork uses a different name for this reason.
 
-The 3D art in `public/assets/` is CC0, by Kay Lousberg and Kenney. Refer to
+The 3D art in `public/assets/` is CC0, by Kay Lousberg and Kenney. The Medieval planet uses the
+KayKit Medieval Hexagon Pack and the KayKit Skeletons pack. Refer to
 [CREDITS.md](public/assets/CREDITS.md). The status icons are
 [Material Design Icons](https://pictogrammers.com/library/mdi/), under the Apache-2.0 licence.
 

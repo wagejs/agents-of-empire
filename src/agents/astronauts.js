@@ -4,6 +4,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { buildFaceAtlas, FACE, FACE_LOOPS, FRAME_COLS, FRAME_ROWS } from './faces.js'
 import { animateFace } from './face-animation.js'
 import { attachMatrixAt, decorateSkinned, frameFor } from './crew.js'
+import { HEROES, SKELETON_TYPES, withGlowingEyes } from './skeletons.js'
 import { bendPoint, withCurve } from '../core/curve.js'
 import { Props, CHECK_LEN, CHECK_EVERY, pickProp } from './props.js'
 import { projectHitPoint, bodyHitDistance } from './picking.js'
@@ -160,6 +161,10 @@ export class Astronauts {
     this.capacity = 0
     this.group = new THREE.Group()
     this.group.name = 'astronauts'
+    // 'astronaut' or 'skeletons' — the planet's crew. See `setCrewStyle`.
+    this.crewStyle = 'astronaut'
+    this.skeletonData = null
+    this.skeletons = null
     scene.add(this.group)
 
     this.reflectionUniforms = reflectionUniforms()
@@ -322,9 +327,69 @@ export class Astronauts {
     // these anchors in step with CREW_SCALE; picking follows the animated bones below.
     const restHeadY = rig.attach[(this.headSlot + 0) * 16 + 13]
     this.headHeight = (restHeadY + P.headUp) * CREW_SCALE
+    this._buildSkeletons()
+  }
+
+  /** The merged skeleton bodies, from `loadSkeletons`. */
+  setSkeletons(data) {
+    this.skeletonData = data
+    this._buildSkeletons()
+  }
+
+  /** Which crew the planet has: the astronauts, or the KayKit skeletons. */
+  setCrewStyle(style) {
+    this.crewStyle = style === 'skeletons' ? 'skeletons' : 'astronaut'
+  }
+
+  /** One instanced mesh per skeleton type, all playing the crew's baked animation table. */
+  _buildSkeletons() {
+    this._disposeSkeletons()
+    const data = this.skeletonData
+    if (!data || !this.rig) return
+    const material = withGlowingEyes(
+      decorateSkinned(new THREE.MeshStandardMaterial({ map: data.map, roughness: 0.8, metalness: 0 }), this.crewUniforms)
+    )
+    const depth = decorateSkinned(
+      new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }),
+      this.crewUniforms,
+      { normals: false }
+    )
+    const white = new THREE.Color(1, 1, 1)
+    this.skeletons = {}
+    for (const type of SKELETON_TYPES) {
+      const geo = data.geometries[type].clone()
+      const frames = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1)
+      frames.setUsage(THREE.DynamicDrawUsage)
+      geo.setAttribute('aFrame', frames)
+      const mesh = new THREE.InstancedMesh(geo, material, this.capacity)
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      for (let i = 0; i < this.capacity; i++) mesh.setColorAt(i, white)
+      mesh.instanceColor.setUsage(THREE.DynamicDrawUsage)
+      mesh.customDepthMaterial = depth
+      mesh.count = 0
+      mesh.frustumCulled = false
+      mesh.receiveShadow = false
+      mesh.userData.frames = frames
+      this.skeletons[type] = mesh
+      this.group.add(mesh)
+    }
+    this._applyShadowFlags()
+  }
+
+  _disposeSkeletons() {
+    if (!this.skeletons) return
+    const first = Object.values(this.skeletons)[0]
+    for (const mesh of Object.values(this.skeletons)) {
+      this.group.remove(mesh)
+      mesh.geometry.dispose()
+    }
+    first.material.dispose()
+    first.customDepthMaterial.dispose()
+    this.skeletons = null
   }
 
   _disposeCrew() {
+    this._disposeSkeletons()
     if (!this.crew) return
     this.group.remove(this.crew)
     this.crew.geometry.dispose()
@@ -444,6 +509,7 @@ export class Astronauts {
     }
     // The body is the shadow that matters — it is the whole silhouette.
     if (this.crew) this.crew.castShadow = on
+    for (const mesh of Object.values(this.skeletons || {})) mesh.castShadow = on
     this.props?.setShadows(on)
   }
 
@@ -611,6 +677,9 @@ export class Astronauts {
       walkPersonality: (hash(entry.id) >>> 0) / 0x100000000,
       suit: entry.thread?.parentId ? SUBAGENT_SUIT : SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length],
       size: entry.thread?.parentId ? SUBAGENT_SIZE : 1,
+      // Which skeleton this thread is on a skeleton planet: subagents are minions, and a
+      // main thread is one of the heroes, fixed by its id so it stays the same one.
+      skeleton: entry.thread?.parentId ? 'minion' : HEROES[(hash(entry.id) >>> 7) % HEROES.length],
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
       hop: 0,
@@ -1463,6 +1532,8 @@ export class Astronauts {
     const one = this._one
     const frames = this.frameAttr.array
     const crewFrames = this.crewFrameAttr?.array
+    const skeletons = this.crewStyle === 'skeletons' ? this.skeletons : null
+    const drawn = {}
 
     let i = 0
     let hands = 0
@@ -1493,7 +1564,13 @@ export class Astronauts {
       root.compose(v, q, one.setScalar(s * CREW_SCALE * agent.size))
       one.setScalar(1)
 
-      if (crew) {
+      if (skeletons) {
+        const mesh = skeletons[agent.skeleton]
+        const j = (drawn[agent.skeleton] = (drawn[agent.skeleton] ?? -1) + 1)
+        mesh.setMatrixAt(j, root)
+        mesh.userData.frames.array[j] = agent.frame
+        mesh.setColorAt(j, agent.eye)
+      } else if (crew) {
         crew.setMatrixAt(i, root)
         crewFrames[i] = agent.frame
       }
@@ -1569,8 +1646,18 @@ export class Astronauts {
       mesh.instanceMatrix.needsUpdate = true
       if (mesh.instanceColor && (staticDirty || animated.has(name))) mesh.instanceColor.needsUpdate = true
     }
+    // A skeleton is its own head and has nothing to wear but the hammer and the props.
+    if (skeletons) {
+      for (const name of ['helmet', 'visor', 'face', 'pack', 'antenna', 'tip', 'lamp']) this.parts[name].count = 0
+    }
+    for (const [type, mesh] of Object.entries(this.skeletons || {})) {
+      mesh.count = skeletons ? (drawn[type] ?? -1) + 1 : 0
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.instanceColor.needsUpdate = true
+      mesh.userData.frames.needsUpdate = true
+    }
     if (crew) {
-      crew.count = n
+      crew.count = skeletons ? 0 : n
       crew.instanceMatrix.needsUpdate = true
       this.crewFrameAttr.needsUpdate = true
       if (staticDirty && crew.instanceColor) crew.instanceColor.needsUpdate = true

@@ -12,6 +12,7 @@ import { DECK_TOP, PLOT_CELL, hexToWorld, worldToHex } from './world/plots.js'
 import { planMove } from './world/plot-move.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
+import { loadSkeletons } from './agents/skeletons.js'
 import { TIMES } from './world/sky.js'
 import { CURVE_FULL, bendPoint, installWorldCurve, setCurveView } from './core/curve.js'
 import { Ambience } from './audio/ambience.js'
@@ -51,6 +52,8 @@ app.insertAdjacentHTML(
 )
 
 const settings = new Settings()
+// A chosen start planet wins over wherever the last visit left off, before the colony is built.
+if (PLANETS[settings.get('startPlanet')]) settings.set('planet', settings.get('startPlanet'))
 // A phone gets the light preset the first time: a retina panel at full scale with bloom
 // and shadows is more than its GPU wants to do at sixty, and the governor only ever finds
 // that out by stuttering first.
@@ -1225,7 +1228,10 @@ async function boot() {
         colony.restoreLayout(state.plots)
         // And the settings, but only for a browser that has none of its own — an explicit
         // choice made here always outranks the file.
-        if (!hasStoredSettings() && state.settings) settings.applyAll(state.settings)
+        if (!hasStoredSettings() && state.settings) {
+          settings.applyAll(state.settings)
+          if (PLANETS[settings.get('startPlanet')]) settings.set('planet', settings.get('startPlanet'))
+        }
       })
       .catch(() => {
         // Not "first run, or the file is gone": the server answers a missing file with an empty
@@ -1242,6 +1248,12 @@ async function boot() {
     console.error(kitError || crewError)
   }
   colony.astronauts.setRig(crewRig())
+  // The skeletons only matter on a skeleton planet, so they load after boot, not before it.
+  if (crewRig()) {
+    loadSkeletons(crewRig())
+      .then((data) => colony.astronauts.setSkeletons(data))
+      .catch((err) => console.error('Could not load the skeletons', err))
+  }
   if (!kitError) colony.onAssetsReady()
 
   await poll()

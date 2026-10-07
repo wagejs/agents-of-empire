@@ -8,7 +8,8 @@
  * node the runtime can look up.
  *
  * Usage: build-kit.mjs <src-gltf-dir> <out.glb> [model,model,...]
- * With no model list, everything in the directory is packed.
+ * With no model list, everything in the directory is packed. A model may be a path under the
+ * directory, `buildings/blue/building_home_A_blue`, for packs that sort models into folders.
  */
 import { NodeIO } from '@gltf-transform/core'
 import { dedup, mergeDocuments, prune, unpartition, weld } from '@gltf-transform/functions'
@@ -33,13 +34,12 @@ if (!existsSync(SRC)) {
 }
 
 const keep = WANTED ? new Set(WANTED.split(',').map((s) => s.trim())) : null
-const files = readdirSync(SRC)
-  .filter((f) => f.endsWith('.gltf'))
-  .filter((f) => !keep || keep.has(basename(f, '.gltf')))
-  .sort()
+const files = keep
+  ? [...keep].map((n) => `${n}.gltf`).sort()
+  : readdirSync(SRC).filter((f) => f.endsWith('.gltf')).sort()
 
 if (keep) {
-  const missing = [...keep].filter((n) => !files.includes(`${n}.gltf`))
+  const missing = files.filter((f) => !existsSync(join(SRC, f)))
   if (missing.length) throw new Error(`${SRC}: no such model: ${missing.join(', ')}`)
 }
 if (!files.length) throw new Error(`${SRC}: nothing to pack`)

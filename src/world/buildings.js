@@ -108,7 +108,8 @@ const PLANET_TINT_MASK = cellMask([CELL.WHITE, CELL.GREY, CELL.SLATE])
  * each carrying a per-vertex emissive flag, so the whole lot merges into one buffer.
  */
 class Composer {
-  constructor() {
+  constructor(kit = 'base') {
+    this.kit = kit
     this.parts = []
   }
 
@@ -117,7 +118,7 @@ class Composer {
    * @param {object} [o]   `x`/`y`/`z` offset, `ry` yaw, `s` uniform scale, `emissive` 0..1
    */
   add(name, o = {}) {
-    const geo = part(name, 'base', { solo: o.solo })
+    const geo = part(name, this.kit, { solo: o.solo })
     const s = o.s ?? 1
     if (s !== 1) geo.scale(s, s, s)
     if (o.ry) geo.rotateY(o.ry)
@@ -269,6 +270,68 @@ const KINDS = {
 
 const KIND_IDS = Object.keys(KINDS)
 
+// ── the Medieval planet ──────────────────────────────────────────────────────────────
+
+/**
+ * KayKit's Medieval Hexagon Pack, on the Medieval planet. Unlike the space kit these are whole
+ * buildings, one model each, in four team colours, and that colour is the thread's status:
+ * green working, blue waiting on you, red blocked, yellow celebrating. An idle thread keeps a
+ * colour of its own, muted toward grey.
+ *
+ * A young thread shows the pack's construction stages instead of a building: scaffolding, then
+ * three stages of a house going up. The thresholds are on `transcriptProgress`, which runs
+ * from about 5 KB of transcript (0.2) to a few MB (1).
+ */
+export const STATUS_TEAM = { working: 'green', waiting: 'blue', blocked: 'red', celebrating: 'yellow' }
+const TEAMS = ['blue', 'green', 'red', 'yellow']
+const STAGES = [
+  [0.25, 'building_scaffolding', 'Scaffolding'],
+  [0.4, 'building_stage_A', 'Foundations'],
+  [0.5, 'building_stage_B', 'Framing'],
+  [0.6, 'building_stage_C', 'Roofing'],
+]
+/** What most threads grow into, and what only the biggest ones become. */
+const MEDIEVAL_COMMON = [
+  ['home_A', 'House'], ['home_B', 'House'], ['tavern', 'Tavern'], ['blacksmith', 'Blacksmith'],
+  ['market', 'Market'], ['well', 'Well'], ['lumbermill', 'Lumber mill'], ['mine', 'Mine'],
+  ['barracks', 'Barracks'], ['archeryrange', 'Archery range'], ['watermill', 'Watermill'], ['tower_A', 'Tower'],
+]
+// No castle: the castle is the colony's home — see Ship.setStyle.
+const MEDIEVAL_GRAND = [['church', 'Church'], ['windmill', 'Windmill'], ['tower_B', 'Great tower']]
+
+/** The medieval models are half the size of the space kit's, so they scale up further. */
+const MEDIEVAL_SCALE = 2.3
+
+/**
+ * Which medieval building a thread shows right now. Only what changes the model is in the
+ * returned `look`, so the colony rebuilds a building when that changes and never otherwise.
+ */
+export function medievalLook(seed, progress, status) {
+  const rand = mulberry(seed)
+  const own = TEAMS[Math.floor(rand() * TEAMS.length)]
+  const stage = STAGES.find(([upTo]) => progress < upTo)
+  const pool = progress > 0.9 ? MEDIEVAL_GRAND : MEDIEVAL_COMMON
+  const [type, label] = pool[Math.floor(rand() * pool.length)]
+  const team = STATUS_TEAM[status] || own
+  const muted = !STATUS_TEAM[status]
+  if (stage) return { look: `stage:${stage[1]}:${muted}`, model: stage[1], label: stage[2], team: null, muted }
+  return { look: `${type}:${team}:${muted}`, model: `building_${type}_${team}`, type, label, team, muted }
+}
+
+function medievalRecipe(c, { model, type, team }) {
+  if (type === 'windmill') {
+    // Taken apart so the sails can turn: the tower, its cap, and the sails on their own.
+    c.add(model, { solo: true })
+    c.add(`building_windmill_top_${team}`, { y: 0.69, solo: true })
+    c.add(`building_windmill_top_fan_${team}`, { y: 0.96, z: 0.33, spin: 0.35 })
+  } else {
+    c.add(model)
+  }
+}
+
+const MEDIEVAL_ROUGHNESS = new Float32Array(CELL_COUNT).fill(0.82)
+const NO_CELLS = new Float32Array(CELL_COUNT)
+
 // ── the reveal shader ─────────────────────────────────────────────────────────────────
 
 /**
@@ -344,6 +407,7 @@ function decorate(material, uniforms) {
          uniform float uNight;
          uniform vec3 uPlanetTint;
          uniform float uPlanetTintAmount;
+         uniform float uMute;
          uniform float uCellAccent[ ${CELL_COUNT} ];
          uniform float uCellPlanetTint[ ${CELL_COUNT} ];
          uniform float uCellRoughness[ ${CELL_COUNT} ];
@@ -383,6 +447,11 @@ function decorate(material, uniforms) {
          if ( accentAmount > 0.0 ) {
            float lum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
            diffuseColor.rgb = mix( diffuseColor.rgb, uAccent * clamp( lum * 1.9, 0.3, 1.5 ), accentAmount );
+         }
+         // An idle thread's building, toward grey: it keeps its shape, not a status colour.
+         if ( uMute > 0.0 ) {
+           float muteLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+           diffuseColor.rgb = mix( diffuseColor.rgb, vec3( muteLum ), uMute );
          }`
       )
       // Per-cell PBR: painted panels, brushed metal and photovoltaic glass in one texture.
@@ -464,12 +533,18 @@ function depthMaterial(uniforms) {
  *
  * Requires `loadKit()` to have resolved — boot awaits it before the first roster arrives.
  */
-export function createBuilding({ seed = 1, accent = 0xc96442, kind = null } = {}) {
+export function createBuilding({ seed = 1, accent = 0xc96442, kind = null, medieval = null } = {}) {
   const rand = mulberry(seed)
-  const chosen = kind && KINDS[kind] ? kind : KIND_IDS[Math.floor(rand() * KIND_IDS.length)]
+  const chosen = medieval ? medieval.type || 'stage' : kind && KINDS[kind] ? kind : KIND_IDS[Math.floor(rand() * KIND_IDS.length)]
 
-  const c = new Composer()
-  const label = KINDS[chosen](c, rand, accent)
+  const c = new Composer(medieval ? 'medieval' : 'base')
+  let label
+  if (medieval) {
+    medievalRecipe(c, medieval)
+    label = medieval.label
+  } else {
+    label = KINDS[chosen](c, rand, accent)
+  }
   const geo = c.finish()
   let radius = 0
   const positions = geo.getAttribute('position')
@@ -478,7 +553,7 @@ export function createBuilding({ seed = 1, accent = 0xc96442, kind = null } = {}
   }
   // Fit the complete recipe, including its barrels/rover, at any yaw. Measuring only
   // the X/Z bounds missed corners and left accessories hanging beyond the deck.
-  const scale = Math.min(BUILDING_SCALE, BUILDING_RADIUS / Math.max(radius, 0.001))
+  const scale = Math.min(medieval ? MEDIEVAL_SCALE : BUILDING_SCALE, BUILDING_RADIUS / Math.max(radius, 0.001))
   geo.scale(scale, scale, scale)
   // `scale()` transforms position and normal and nothing else, so a custom attribute that
   // holds a *position* has to be taken along by hand. Miss this and a rotor turns about a
@@ -507,15 +582,18 @@ export function createBuilding({ seed = 1, accent = 0xc96442, kind = null } = {}
     uTime: buildingUniforms.uTime,
     uPlanetTint: buildingUniforms.uPlanetTint,
     uPlanetTintAmount: buildingUniforms.uPlanetTintAmount,
-    uCellAccent: { value: ACCENT_MASK },
-    uCellPlanetTint: { value: PLANET_TINT_MASK },
-    uCellRoughness: { value: ROUGHNESS },
-    uCellMetalness: { value: METALNESS },
+    uMute: { value: medieval?.muted ? 0.7 : 0 },
+    // The cell masks are the space kit's atlas; the medieval one has its own layout, so none
+    // of the repaints apply there and every surface is plain painted wood and stone.
+    uCellAccent: { value: medieval ? NO_CELLS : ACCENT_MASK },
+    uCellPlanetTint: { value: medieval ? NO_CELLS : PLANET_TINT_MASK },
+    uCellRoughness: { value: medieval ? MEDIEVAL_ROUGHNESS : ROUGHNESS },
+    uCellMetalness: { value: medieval ? NO_CELLS : METALNESS },
   }
 
   const material = decorate(
     new THREE.MeshStandardMaterial({
-      map: atlasTexture(),
+      map: atlasTexture(medieval ? 'medieval' : 'base'),
       // Roughness and metalness arrive per atlas cell; these are only the fallback values.
       roughness: 0.6,
       metalness: 0,
@@ -543,6 +621,7 @@ export function createBuilding({ seed = 1, accent = 0xc96442, kind = null } = {}
   mesh.customDepthMaterial = depth
 
   mesh.userData.kind = chosen
+  mesh.userData.look = medieval ? medieval.look : 'space'
   mesh.userData.label = label
   mesh.userData.height = height
   mesh.userData.footprint = footprint

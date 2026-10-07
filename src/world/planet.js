@@ -122,6 +122,59 @@ export const PLANETS = {
     grade: { saturation: 1.12, warmth: 0.03 },
   },
 
+  /**
+   * Terra's meadows with a medieval town on them: KayKit's Medieval Hexagon Pack for the
+   * buildings, coloured by what each thread is doing, and its skeletons for the crew.
+   */
+  medieval: {
+    id: 'medieval',
+    name: 'Medieval',
+    blurb: 'Meadows, a town of timber and stone, and skeletons at work.',
+    buildings: 'medieval',
+    crew: 'skeletons',
+    // Laid in KayKit hex tiles (hexboard.js) on an island in the sea. The sea sits at the
+    // tiles' shoreline: DECK_TOP 0.45 less 0.15 of a 1.5-deep tile — `boardSeaLevel`.
+    board: true,
+    shape: 'island',
+    water: { level: 0.225, shallow: 0x4fc8d8, deep: 0x1a5aa0, foam: 0xffffff, waveHeight: 0.06, sparkle: 0.8 },
+    ground: { low: 0x3d6b38, high: 0x7fa356, tint: 0x94b866 },
+    rock: 0x7a776c,
+    horizon: 0x8cb8dc,
+    sky: { top: 0x2c5f9e, bottom: 0xb4d4ea },
+    fog: { color: 0x8aa8bc, near: 92, far: 230 },
+    sun: { color: 0xffeccc, intensity: 2.5, night: 0.13 },
+    ambient: { sky: 0x92c2e6, ground: 0x48603a, intensity: 0.95 },
+    atmosphere: 1,
+    craters: 0,
+    roughness: 0.75,
+    scatter: 'flora',
+    grass: { sway: 0.6 },
+    companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
+    dust: 0.2,
+    weather: [
+      { kind: 'pollen', rate: 0.2 },
+      { kind: 'fireflies', rate: 0.6 },
+    ],
+    clouds: { amount: 0.4, color: 0xffffff, speed: 1 },
+    fauna: {
+      birds: { kind: 'crow', count: 6, altitude: [8, 16], colors: [0x2a2420, 0x3a302a], size: 1.1 },
+      butterflies: { count: 10, colors: [0xffd45a, 0xffffff, 0xff9a5a] },
+    },
+    audio: {
+      beds: [
+        { sound: 'wind-soft', gain: 0.45 },
+        { sound: 'meadow-birds', gain: 0.5, night: 0 },
+        { sound: 'crickets', gain: 0, night: 0.6 },
+      ],
+      events: [
+        { sound: 'crow', every: [15, 45], gain: 0.4, when: 'day', where: 'ring' },
+        { sound: 'owl', every: [25, 70], gain: 0.5, when: 'night', where: 'ring' },
+        { sound: 'wind-gust', every: [20, 60], gain: 0.35, where: 'ring' },
+      ],
+    },
+    grade: { saturation: 1.1, warmth: 0.06 },
+  },
+
   // ── the eight new ones ────────────────────────────────────────────────────────────
 
   desert: {
@@ -530,7 +583,7 @@ export const PLANETS = {
 }
 
 /** Display order for the picker: home first, then outward, then the pretty ones. */
-export const PLANET_ORDER = ['moon', 'mars', 'terra', 'beach', 'ocean', 'jungle', 'desert', 'tundra', 'autumn', 'sakura', 'volcanic', 'sky']
+export const PLANET_ORDER = ['moon', 'mars', 'terra', 'medieval', 'beach', 'ocean', 'jungle', 'desert', 'tundra', 'autumn', 'sakura', 'volcanic', 'sky']
 
 export const GROUND_SIZE = 340
 /** Everything inside this radius is the buildable colony, and is kept nearly flat. */

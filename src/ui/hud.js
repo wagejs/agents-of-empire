@@ -218,6 +218,15 @@ export class Hud {
       this.controls.push({ el: b, sync: () => b.setAttribute('aria-pressed', String(this.settings.get('planet') === id)) })
     }
     world.appendChild(planets)
+    // Picking a planet above is for now; this is the one the colony comes back to on a reload.
+    world.appendChild(
+      this._select(
+        'Start on',
+        'startPlanet',
+        [['', 'Where I left off'], ...PLANETS_ORDER.map((id) => [id, PLANETS[id].name])],
+        'The planet the colony opens on'
+      )
+    )
     body.appendChild(world)
 
     // Lighting.

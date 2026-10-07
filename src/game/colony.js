@@ -8,6 +8,7 @@ import { createGrass } from '../world/grass.js'
 import { createSkyIsland } from '../world/skyisland.js'
 import { SKY_MARGIN, SKY_MAX_CELLS, setIslandFootprint } from '../world/planet.js'
 import { createHexIsland } from '../world/hexisland.js'
+import { createHexBoard, layoutBoard } from '../world/hexboard.js'
 import { bendPoint } from '../core/curve.js'
 import { Sky } from '../world/sky.js'
 import {
@@ -21,8 +22,8 @@ import {
   PLOT_PALETTE,
   PLOT_CELL,
 } from '../world/plots.js'
-import { translateCells } from '../world/plot-move.js'
-import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
+import { SHIP_CELL, translateCells } from '../world/plot-move.js'
+import { createBuilding, buildingUniforms, medievalLook, Scaffolds } from '../world/buildings.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
@@ -156,6 +157,7 @@ export class Colony {
 
     this.ship = new Ship(scene, shipPosition())
     this.astronauts = new Astronauts(scene, settings)
+    this.astronauts.setCrewStyle(this.planet.crew)
     this.astronauts.world = this._world()
     // Sized for the largest preset rather than the current one: unlike the astronaut meshes these
     // buffers are never rebuilt, so allocating against today's `maxAgents` means raising quality
@@ -207,9 +209,13 @@ export class Colony {
     }
 
     // An island world is shaped around the colony: the coast has to know the cells first.
-    if (this.planet.shape === 'island') setIslandFootprint(this._footprintCells(), PLOT_CELL)
+    // A tiled world brings its own land: the terrain is all sea bed, bar a hump under the
+    // middle that the tiles cover.
+    if (this.planet.board) setIslandFootprint([], PLOT_CELL)
+    else if (this.planet.shape === 'island') setIslandFootprint(this._footprintCells(), PLOT_CELL)
     this.terrain = createTerrain(this.planet, this.settings.get('groundDetail'))
     this.worldGroup.add(this.terrain)
+    this._buildBoard()
     this._buildIsland()
     this._buildWater()
     this._buildScatter()
@@ -218,7 +224,8 @@ export class Colony {
     // cell, but the height of that spot is the planet's, so it is set here rather than once
     // at construction — a world with more relief would otherwise leave it hovering.
     const ship = shipPosition()
-    this.ship.group.position.y = terrainHeight(ship.x, ship.z, this.planet)
+    this.ship.group.position.y = this.board ? DECK_TOP : terrainHeight(ship.x, ship.z, this.planet)
+    this.ship.setStyle(this.planet.board ? 'castle' : 'ship')
 
     this._dustTint.set(this.planet.ground.high)
 
@@ -235,6 +242,25 @@ export class Colony {
       })
     }
     this._syncFaunaSites()
+  }
+
+  /** The Medieval planet's hex tiles, laid around whatever cells the colony holds now. */
+  _buildBoard() {
+    if (this.board) {
+      this.worldGroup.remove(this.board)
+      this.board.geometry.dispose()
+      this.board.material.dispose()
+      this.board = null
+    }
+    this.boardCells = null
+    if (!this.planet.board) return
+    const footprint = [SHIP_CELL]
+    for (const plot of this.plotOrder || []) footprint.push(...plot.cells)
+    const cells = layoutBoard(footprint)
+    this.board = createHexBoard(cells, DECK_TOP)
+    if (!this.board) return // the kit is not in yet; `onAssetsReady` builds the terrain again
+    this.boardCells = cells
+    this.worldGroup.add(this.board)
   }
 
   /** Where the drones fly between: the lander, and every building with anyone at it. */
@@ -386,7 +412,9 @@ export class Colony {
     }
     const ship = shipPosition()
     clear.push({ x: ship.x, z: ship.z, r: 7.5 })
-    this.scatterGroup = createScatter(this.planet, this.settings.get('scatterDensity'), clear, 4242, (x, z) => this.onIsland(x, z))
+    // A tiled world is dressed by its tiles — see hexboard.js.
+    const density = this.planet.board ? 0 : this.settings.get('scatterDensity')
+    this.scatterGroup = createScatter(this.planet, density, clear, 4242, (x, z) => this.onIsland(x, z))
     this.worldGroup.add(this.scatterGroup)
     this._scatterFootprint = this._plotFootprint()
     this._buildGrass(clear)
@@ -411,7 +439,7 @@ export class Colony {
       blocked: (x, z) => !this.onIsland(x, z) ||
         this.plotOrder.some((plot) => plot.containsWorld(x, z, -0.4)) ||
         (apron && (x - apron.x) ** 2 + (z - apron.z) ** 2 < apron.r * apron.r),
-      density: this.settings.get('scatterDensity'),
+      density: this.planet.board ? 0 : this.settings.get('scatterDensity'),
       quality: detail === 'high' ? 'high' : detail === 'low' ? 'low' : 'medium',
     })
     if (this.grass) this.worldGroup.add(this.grass.mesh)
@@ -442,6 +470,10 @@ export class Colony {
     this._applyPlanetTint()
     this.sky.setPlanet(planet)
     this._buildTerrain()
+    this.astronauts.setCrewStyle(planet.crew)
+    for (const plot of this.plots.values()) plot.setGround(this._groundStyle())
+    // A planet with buildings of its own rebuilds every standing one now, not on the next scan.
+    for (const entry of this.buildings.values()) if (entry.thread && !entry.retiring) this._restyleBuilding(entry)
   }
 
   /**
@@ -566,7 +598,7 @@ export class Colony {
         if (status === 'waiting' || status === 'blocked' || status === 'working') active.add(plot.id)
         stats.agents++
 
-        const building = this._syncBuilding(thread, plot, i)
+        const building = this._syncBuilding(thread, plot, i, status)
         seenBuildings.add(thread.id)
 
         roster.push({
@@ -642,6 +674,7 @@ export class Colony {
       if (!cells?.length) return
       const accent = this._pickAccent(name)
       const plot = new Plot({ id: name, name, index, cells, accent })
+      plot.setGround(this._groundStyle())
       plot.signature = wanted.get(name)
       this.plots.set(name, plot)
       this.plotGroup.add(plot.group)
@@ -657,7 +690,7 @@ export class Colony {
     // nor, on a floating island, the rock under them; and on an island in the sea, the
     // coast itself moves, which is the whole terrain.
     if (this.scatterGroup && this._plotFootprint() !== this._scatterFootprint) {
-      if (this.planet.shape === 'island') this._buildTerrain()
+      if (this.planet.shape === 'island' || this.planet.board) this._buildTerrain()
       else {
         this._buildScatter()
         if (this.island) this._syncIslandRock()
@@ -692,6 +725,7 @@ export class Colony {
   groundAt(x, z) {
     const cell = worldToHex(x, z)
     if (this.deckedCells?.has(`${cell.q},${cell.r}`)) return DECK_TOP
+    if (this.boardCells?.has(`${cell.q},${cell.r}`)) return DECK_TOP
     return terrainHeight(x, z, this.planet)
   }
 
@@ -715,13 +749,49 @@ export class Colony {
     return PLOT_PALETTE[start]
   }
 
-  _syncBuilding(thread, plot, index) {
+  /**
+   * What a thread's building is made of on this planet. The space kit's is fixed by the
+   * thread id; a medieval one also follows the thread's status and how far along it is.
+   */
+  _buildingSpec(thread, plot, status) {
+    const seed = hashString(thread.id)
+    const medieval = this.planet.buildings === 'medieval' ? medievalLook(seed, transcriptProgress(thread), status) : null
+    return { seed, accent: plot.accent, medieval }
+  }
+
+  /**
+   * Swap a standing building for the one its thread should show now: a planet switch, or a
+   * medieval building changing colour or stage. Same place and turn, already whole: only
+   * a new building rises out of the ground.
+   */
+  /** Medieval plots are meadow; every other planet keeps the metal deck. */
+  _groundStyle() {
+    return this.planet.board ? 'tiles' : this.planet.buildings === 'medieval' ? 'grass' : 'plate'
+  }
+
+  _restyleBuilding(entry) {
+    const spec = this._buildingSpec(entry.thread, { accent: entry.accent }, entry.status)
+    if ((spec.medieval?.look || 'space') === entry.mesh.userData.look) return
+    const old = entry.mesh
+    const mesh = createBuilding(spec)
+    mesh.position.copy(old.position)
+    mesh.rotation.y = old.rotation.y
+    mesh.userData.setProgress(entry.progress)
+    this.worldGroup.add(mesh)
+    this.worldGroup.remove(old)
+    old.geometry.dispose()
+    old.material.dispose()
+    old.customDepthMaterial?.dispose()
+    entry.mesh = mesh
+  }
+
+  _syncBuilding(thread, plot, index, status) {
     let entry = this.buildings.get(thread.id)
     // Whole, always. A building that has finished rising is a building you can see all of.
     const target = 1
 
     if (!entry) {
-      const mesh = createBuilding({ seed: hashString(thread.id), accent: plot.accent })
+      const mesh = createBuilding(this._buildingSpec(thread, plot, status))
       const pos = plot.worldSlot(index)
       mesh.position.copy(pos)
       mesh.rotation.y = ((hashString(thread.id) >>> 8) % 360) * (Math.PI / 180)
@@ -746,6 +816,9 @@ export class Colony {
     entry.target = target
     entry.accent = plot.accent
     entry.retiring = false
+    entry.thread = thread
+    entry.status = status
+    this._restyleBuilding(entry)
     return entry
   }
 
@@ -1203,7 +1276,7 @@ export class Colony {
     const ship = this.ship.group.position
     const sdx = ship.x - focus.x
     const sdz = ship.z - focus.z
-    if (sdx * sdx + sdz * sdz < reach2 && Math.random() < dt * (0.8 + night * 1.4)) {
+    if (this.ship.style !== 'castle' && sdx * sdx + sdz * sdz < reach2 && Math.random() < dt * (0.8 + night * 1.4)) {
       const a = Math.random() * Math.PI * 2
       const r = 2 + Math.random() * 3
       c.setRGB(0.7, 1.4, 2.4)

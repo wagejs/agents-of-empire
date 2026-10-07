@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { withCurve } from '../core/curve.js'
+import { atlasTexture, hasPart, part } from './kit.js'
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 
 /**
@@ -26,6 +27,10 @@ const SURFACE = new Map([
   [0x4a4d55, [0.35, 0.85]],
 ])
 const DEFAULT_SURFACE = [0.55, 0.15]
+
+/** The Medieval planet's home, and how big it stands: a landmark, a size up on the town. */
+const CASTLE = 'building_castle_blue'
+const CASTLE_SCALE = 2.9
 
 export class Ship {
   constructor(scene, position) {
@@ -255,6 +260,43 @@ export class Ship {
     apron.position.y = 0.05
     apron.receiveShadow = true
     this.group.add(apron)
+  }
+
+  /**
+   * What the crew comes out of: the lander, or on the Medieval planet a castle. The castle
+   * stands on the same spot, its gate facing the colony; the crew appears just inside the
+   * gate and steps out, so the "ramp" is flat. Needs the medieval kit, and stays the lander
+   * until it is in.
+   */
+  setStyle(style) {
+    const want = style === 'castle' && hasPart(CASTLE, 'medieval') ? 'castle' : 'ship'
+    if (want === this.style) return
+    this.style = want
+    this._shipLocals ??= { door: this.doorLocal.clone(), airlock: this.airlockLocal.clone(), parts: [...this.group.children] }
+    if (this.castle) {
+      this.group.remove(this.castle)
+      this.castle.geometry.dispose()
+      this.castle.material.dispose()
+      this.castle = null
+    }
+    for (const child of this._shipLocals.parts) child.visible = want === 'ship'
+    if (want === 'ship') {
+      this.doorLocal.copy(this._shipLocals.door)
+      this.airlockLocal.copy(this._shipLocals.airlock)
+      return
+    }
+    const geo = part(CASTLE, 'medieval')
+    geo.scale(CASTLE_SCALE, CASTLE_SCALE, CASTLE_SCALE)
+    const material = new THREE.MeshStandardMaterial({ map: atlasTexture('medieval'), roughness: 0.85, metalness: 0 })
+    material.onBeforeCompile = (shader) => withCurve(shader)
+    this.castle = new THREE.Mesh(geo, material)
+    this.castle.castShadow = this.castle.receiveShadow = true
+    this.castle.name = 'castle'
+    this.group.add(this.castle)
+    // The gate is on the castle's +z face, which the group already turns toward the colony.
+    const front = 1.0 * CASTLE_SCALE
+    this.airlockLocal.set(0, 0, front - 0.4)
+    this.doorLocal.set(0, 0, front + 1.2)
   }
 
   /** World position of the foot of the ramp — where astronauts appear and vanish. */

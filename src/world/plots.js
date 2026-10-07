@@ -661,6 +661,28 @@ export class Plot {
     this.lampMaterial.color.copy(this._lampBase).multiplyScalar(0.5 + night * 2.4)
   }
 
+  /**
+   * What the deck is made of. `plate` is the colony's metal deck; `grass` is the Medieval
+   * planet's meadow, the same hex slab painted green with a little of the repo's colour left
+   * in it, so zones still read apart. Switching is a material change, never a rebuild.
+   */
+  setGround(style) {
+    if ((this.groundStyle || 'plate') === style) return
+    // On a tiled world the hex tile under the plot is its ground; the deck would only hide it.
+    this.deck.visible = style !== 'tiles'
+    const m = this.deck.material
+    this._plate ??= { map: m.map, normalMap: m.normalMap, roughnessMap: m.roughnessMap, color: m.color.clone(), metalness: m.metalness, roughness: m.roughness }
+    if (style === 'grass') {
+      Object.assign(m, { map: null, normalMap: null, roughnessMap: null, metalness: 0, roughness: 0.95 })
+      m.color.set(0x5f8a3e).lerp(new THREE.Color(this.accent), 0.12)
+    } else {
+      Object.assign(m, { map: this._plate.map, normalMap: this._plate.normalMap, roughnessMap: this._plate.roughnessMap, metalness: this._plate.metalness, roughness: this._plate.roughness })
+      m.color.copy(this._plate.color)
+    }
+    m.needsUpdate = true
+    this.groundStyle = style
+  }
+
   dispose() {
     this.group.traverse((o) => {
       if (o.isMesh) {

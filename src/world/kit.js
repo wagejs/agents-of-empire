@@ -57,6 +57,8 @@ const KITS = {
    * `tools/build-nature.mjs` — so this one has no atlas and its material uses `vertexColors`.
    */
   nature: { file: 'nature.glb', parts: new Map(), solo: new Map(), atlas: null, vertexColors: true },
+  /** KayKit's Medieval Hexagon Pack: the Medieval planet's buildings — see buildings.js. */
+  medieval: { file: 'medieval.glb', parts: new Map(), solo: new Map(), atlas: null },
 }
 
 let loading = null
