@@ -1,4 +1,6 @@
-# Bot Crossing — your agent threads, as a colony
+# agents-world
+
+a fork of Bot Crossing
 
 **[botcrossing.com](https://botcrossing.com)**
 
