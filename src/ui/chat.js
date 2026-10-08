@@ -79,6 +79,32 @@ function toolLine(name, summary) {
   return el
 }
 
+/**
+ * Open `url` in one reused popup window, the chat's size, just to its right. A real window, not
+ * an iframe: GitHub and most sites refuse to be framed, and a window keeps your own logins.
+ * Screen coordinates are the page's offset on screen plus the chat's place in the page.
+ * ponytail: the browser chrome height is guessed from outer − inner, which is exact on macOS
+ * Chrome and close enough elsewhere.
+ */
+let linkWindow = null
+function openBeside(url, rect) {
+  const chromeX = window.screenX + (window.outerWidth - window.innerWidth)
+  const chromeY = window.screenY + (window.outerHeight - window.innerHeight)
+  const width = Math.round(rect.width)
+  const height = Math.round(rect.height)
+  const left = Math.round(Math.min(chromeX + rect.right + 8, screen.availLeft + screen.availWidth - width))
+  const top = Math.round(chromeY + rect.top)
+  // A window showing another site can no longer be moved from here, so a new link gets a new
+  // window, in the right place, where the chat is now.
+  if (linkWindow && !linkWindow.closed) linkWindow.close()
+  // Opened blank and cut loose before the site loads, so the site cannot reach back into this page.
+  linkWindow = window.open('about:blank', 'bot-crossing-link', `popup,width=${width},height=${height},left=${left},top=${top}`)
+  // Blocked: a plain tab is better than nothing.
+  if (!linkWindow) return window.open(url, '_blank', 'noopener')
+  linkWindow.opener = null
+  linkWindow.location.href = url
+}
+
 const STORE_KEY = 'bot-crossing.chat'
 
 /** Which thread's chat this tab had open. Storage can be missing or refuse; then nothing is kept. */
@@ -178,6 +204,13 @@ export class Chat {
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
     this.log = this.$('.chat-log')
+    // A link Claude gives, a PR say, opens in a browser popup beside the chat rather than a tab.
+    this.log.addEventListener('click', (e) => {
+      const link = e.target.closest?.('a[href^="http"]')
+      if (!link || e.metaKey || e.ctrlKey || e.shiftKey) return
+      e.preventDefault()
+      openBeside(link.href, this.sheet.getBoundingClientRect())
+    })
     this.input = this.$('textarea')
 
     // Each thread's chat remembers the size you dragged it to. Only the inline size counts:

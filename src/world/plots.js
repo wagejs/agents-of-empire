@@ -114,7 +114,7 @@ function hexRing(radius) {
   return out
 }
 
-const cellsNeeded = (threadCount) =>
+export const cellsNeeded = (threadCount) =>
   Math.max(1, Math.min(MAX_CELLS, Math.ceil(threadCount / SLOTS_PER_CELL)))
 
 /**

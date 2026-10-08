@@ -1,5 +1,6 @@
 /** The Medieval planet's hex tiles: every connection has a tile, and the board is laid sensibly. */
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { HEX_DIRS, TILES, layoutBoard, layoutFromMap, tileFor, subdivide, unmatched } from '../src/world/hexboard.js'
 import * as THREE from 'three'
@@ -79,4 +80,20 @@ test('a painted map: roads join up, a river runs out to sea, plots stay grass', 
   assert.deepEqual(unmatched({ cells }, footprint), [])
   // A lone river tile in the middle of the land has nowhere to run.
   assert.equal(unmatched({ cells: [...cells.filter(([q, r]) => !(q === 0 && r === 1)), [0, 1, 'river']] }).length, 1)
+})
+
+test('a full painted town grows: the wall moves out a ring and stays closed', async () => {
+  const { growTown, townRoom, townGrowth, layoutFromMap } = await import('../src/world/hexboard.js')
+  const map = JSON.parse(readFileSync(new URL('../public/maps/medieval.json', import.meta.url)))
+  assert.equal(townRoom(map), 7)
+  assert.equal(townGrowth(map, 7), 0)
+  const k = townGrowth(map, 8)
+  assert.equal(k, 1)
+  const grown = growTown(map, k)
+  assert.ok(townRoom(grown) >= 8)
+  // Every wall cell still links up to two others: no gaps opened in it.
+  const board = layoutFromMap(grown, [{ q: -2, r: 1 }])
+  const walls = [...board.values()].filter((c) => c.kind === 'road')
+  assert.ok(walls.length > 13)
+  assert.ok(walls.every((c) => c.angles.length >= 2))
 })

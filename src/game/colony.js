@@ -8,12 +8,13 @@ import { createGrass } from '../world/grass.js'
 import { createSkyIsland } from '../world/skyisland.js'
 import { SKY_MARGIN, SKY_MAX_CELLS, setIslandFootprint } from '../world/planet.js'
 import { createHexIsland } from '../world/hexisland.js'
-import { blockedByMap, boardMap, createHexBoard, layoutBoard, layoutFromMap } from '../world/hexboard.js'
+import { blockedByMap, boardMap, createHexBoard, growTown, layoutBoard, layoutFromMap, townGrowth } from '../world/hexboard.js'
 import { bendPoint } from '../core/curve.js'
 import { Sky } from '../world/sky.js'
 import {
   Plot,
   allocateCells,
+  cellsNeeded,
   shipPosition,
   createLabel,
   hashString,
@@ -257,7 +258,7 @@ export class Colony {
     const footprint = [SHIP_CELL]
     for (const plot of this.plotOrder || []) footprint.push(...plot.cells)
     // A map painted in tools/map-editor.html wins; without one the island is generated.
-    const map = boardMap()
+    const map = growTown(boardMap(), this.townGrowth || 0)
     const cells = map ? layoutFromMap(map, footprint) : layoutBoard(footprint)
     this.board = createHexBoard(cells, DECK_TOP)
     if (!this.board) return // the kit is not in yet; `onAssetsReady` builds the terrain again
@@ -642,11 +643,17 @@ export class Colony {
     // — never because a different repo gained or lost a thread. `plotCells` carries it
     // between polls, and the colony file carries it between sessions.
     // A painted map's roads, rivers and woods stay put: zones grow round them.
-    setBlockedCells(this.planet.board ? blockedByMap(boardMap()) : [])
-    const layout = allocateCells(
-      projects.map(([name, list]) => ({ id: name, size: list.length })),
-      this.plotCells
-    )
+    // The town grows when the colony outgrows it: the wall and all beyond it move out a ring.
+    // Never back in, so a repo going quiet does not knock the wall down on its neighbours.
+    const sizes = projects.map(([name, list]) => ({ id: name, size: list.length }))
+    if (this.planet.board && boardMap()) {
+      const need = sizes.reduce((n, p) => n + cellsNeeded(p.size), 0)
+      const grown = townGrowth(boardMap(), need, this.townGrowth || 0)
+      if (grown !== (this.townGrowth || 0)) this._townGrew = true
+      this.townGrowth = grown
+    }
+    setBlockedCells(this.planet.board ? blockedByMap(growTown(boardMap(), this.townGrowth || 0)) : [])
+    const layout = allocateCells(sizes, this.plotCells)
     // Remembered, not replaced: a project that has just lost its last thread keeps its
     // ground on the books, and the oldest entries fall off the end.
     for (const [name, cells] of layout) {
@@ -693,7 +700,8 @@ export class Colony {
     // Zones that just moved, appeared or grew are zones the scatter does not know about —
     // nor, on a floating island, the rock under them; and on an island in the sea, the
     // coast itself moves, which is the whole terrain.
-    if (this.scatterGroup && this._plotFootprint() !== this._scatterFootprint) {
+    if (this.scatterGroup && (this._townGrew || this._plotFootprint() !== this._scatterFootprint)) {
+      this._townGrew = false
       if (this.planet.shape === 'island' || this.planet.board) this._buildTerrain()
       else {
         this._buildScatter()

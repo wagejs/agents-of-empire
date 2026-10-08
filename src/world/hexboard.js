@@ -279,6 +279,71 @@ export function layoutFromMap(map, footprint = []) {
 /** The cells of a painted map that plots must keep off: everything but plain grass. */
 export const blockedByMap = (map) => (map?.cells || []).filter(([, , kind]) => kind !== 'grass').map(([q, r]) => key(q, r))
 
+const ringOf = (q, r) => (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2
+
+/** The cells of ring `d` around the origin, in walking order: six sides of `d` steps each. */
+function ringCells(d) {
+  if (d === 0) return [{ q: 0, r: 0 }]
+  const out = []
+  let q = HEX_DIRS[4][0] * d
+  let r = HEX_DIRS[4][1] * d
+  for (let i = 0; i < 6; i++) {
+    for (let j = 0; j < d; j++) {
+      out.push({ q, r })
+      q += HEX_DIRS[i][0]
+      r += HEX_DIRS[i][1]
+    }
+  }
+  return out
+}
+
+/**
+ * A painted map with its town made `k` rings bigger. The town is everything inside the first
+ * ring that holds anything but grass, the wall; that ring and all beyond it move out by `k`,
+ * each cell sampled from the same place along its old ring, so the wall stays closed and the
+ * woods and hills keep their shape. The rings that open up inside are grass. Where the castle
+ * stood in the wall, the wall now runs on: the castle itself stays put, inside the town.
+ */
+export function growTown(map, k) {
+  if (!map || k <= 0) return map
+  const paint = new Map((map.cells || []).map(([q, r, kind]) => [key(q, r), kind]))
+  const rings = (map.cells || []).map(([q, r]) => ringOf(q, r))
+  const walled = (map.cells || []).filter(([, , kind]) => kind !== 'grass').map(([q, r]) => ringOf(q, r))
+  if (!walled.length) return map
+  const wall = Math.min(...walled)
+  const cells = (map.cells || []).filter(([q, r]) => ringOf(q, r) < wall)
+  for (let d = wall; d < wall + k; d++) for (const c of ringCells(d)) cells.push([c.q, c.r, 'grass'])
+  for (let d = wall; d <= Math.max(...rings); d++) {
+    const from = ringCells(d)
+    const to = ringCells(d + k)
+    to.forEach((c, p) => {
+      const side = Math.floor(p / (d + k))
+      const src = from[side * d + Math.floor(((p % (d + k)) * d) / (d + k))]
+      let kind = paint.get(key(src.q, src.r))
+      if (!kind) return
+      if (src.q === SHIP_CELL.q && src.r === SHIP_CELL.r) kind = 'road'
+      cells.push([c.q, c.r, kind])
+    })
+  }
+  return { ...map, cells }
+}
+
+/** How many plot cells a painted map's town has: grass inside the wall, less the castle's. */
+export function townRoom(map) {
+  const walled = (map?.cells || []).filter(([, , kind]) => kind !== 'grass').map(([q, r]) => ringOf(q, r))
+  const wall = walled.length ? Math.min(...walled) : Infinity
+  return (map?.cells || []).filter(
+    ([q, r, kind]) => kind === 'grass' && ringOf(q, r) < wall && !(q === SHIP_CELL.q && r === SHIP_CELL.r)
+  ).length
+}
+
+/** The fewest extra rings, at least `atLeast`, that give a painted map's town `need` cells. */
+export function townGrowth(map, need, atLeast = 0) {
+  let k = atLeast
+  while (k < 8 && townRoom(growTown(map, k)) < need) k++
+  return k
+}
+
 /** The cells a painted map asked for but no tile can show — what the editor flags. */
 export function unmatched(map, footprint = []) {
   const board = layoutFromMap(map, footprint)
