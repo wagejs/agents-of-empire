@@ -1277,6 +1277,133 @@ body {
   display: grid;
 }
 
+/* A link opened from the chat: a panel of the chat's size beside it, the pair centred. */
+.chat.with-link {
+  grid-auto-flow: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.chat.with-link .sheet {
+  max-width: calc(50vw - 18px);
+}
+
+.link-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: calc(50vw - 18px);
+  max-height: calc(100dvh - 24px);
+}
+
+.link-panel[hidden] {
+  display: none;
+}
+
+.link-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.link-head .info {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-head .title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-head .sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.link-body iframe {
+  width: calc(100% + 28px);
+  height: calc(100% + 24px);
+  margin: -12px -14px;
+  border: 0;
+  background: #fff;
+}
+
+.link-blocked {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  color: var(--muted);
+}
+
+.gh-meta {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.gh-section {
+  margin-top: 16px;
+}
+
+.gh-section h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.gh-file {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 0;
+}
+
+.gh-file .path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gh-file .add {
+  color: #6fcf8a;
+}
+
+.gh-file .del {
+  color: #ef7a6c;
+}
+
+.gh-comment {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.gh-who {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
 .chat .sheet {
   width: min(640px, calc(100vw - 24px));
   height: min(720px, calc(100dvh - 40px));
@@ -1374,14 +1501,14 @@ body {
   border: 1px solid rgba(201, 100, 66, 0.35);
 }
 
-/* Sent while Claude was working: it goes once the current reply finishes. */
+/* Typed while Claude was working, until Claude Code has taken it in. */
 .chat .msg.user.queued {
   opacity: 0.6;
   border-style: dashed;
 }
 
 .chat .msg.user.queued::after {
-  content: 'Queued, goes when this reply finishes';
+  content: 'Waiting to be sent';
   display: block;
   margin-top: 4px;
   font-size: 11px;
@@ -1599,6 +1726,21 @@ body {
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
+}
+
+/* Several questions page through one at a time; the answers go together from the last. */
+.chat .ask-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.chat .ask-count {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .chat .question.answered .ask {

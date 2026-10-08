@@ -35,7 +35,7 @@ await fsp.writeFile(path.join(project, `${SESSION_ID}.jsonl`), transcript.map((r
 process.env.CLAUDE_CONFIG_DIR = configDir
 process.env.BOT_CROSSING_CLAUDE_DESKTOP = path.join(root, 'no-desktop-app')
 const { default: claudeCode } = await import('../server/harnesses/claude-code.mjs')
-const { activeRun, alwaysRule, answerPermission, attachRun, chatStatus, eventsOf, getRun, modeOf, queueMessage, setRunMode, startRun, stopRun } = await import('../server/chat.mjs')
+const { activeRun, alwaysRule, answerPermission, attachRun, chatStatus, eventsOf, getRun, modeOf, queueMessage, setRunMode, settledBy, startRun, stopRun } = await import('../server/chat.mjs')
 
 const ref = { cliSessionId: SESSION_ID, cwd: root }
 const register = (fields) =>
@@ -189,35 +189,27 @@ test('a reply runs on the server: a page can leave mid-way, and one arriving lat
   assert.equal(activeRun(SESSION_ID), null)
 })
 
-test('messages sent while Claude works go together as the next turn, in the same session', async () => {
-  const prompts = []
+test('messages sent while Claude works go straight into the same session, without waiting for it', async () => {
+  const seen = []
   let release
-  const query = ({ prompt, options }) =>
+  const query = ({ prompt }) =>
     (async function* () {
-      const first = (await prompt[Symbol.asyncIterator]().next()).value
-      prompt = first.message.content
-      prompts.push({ prompt, resume: options.resume })
-      if (prompts.length === 1) await new Promise((resolve) => (release = resolve))
-      yield said(`reply to ${prompt}`)
+      const messages = prompt[Symbol.asyncIterator]()
+      seen.push((await messages.next()).value.message.content)
+      await new Promise((resolve) => (release = resolve))
+      // Mid-reply, what you typed is already there for Claude Code to take in.
+      seen.push((await messages.next()).value.message.content, (await messages.next()).value.message.content)
+      yield said('done all three')
       yield { type: 'result', is_error: false, total_cost_usd: 0 }
     })()
-  const first = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID }, 'build it', { query })
+  const run = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID }, 'build it', { query })
   await until(() => release)
-  queueMessage(first, 'also add tests')
-  queueMessage(first, 'and docs')
+  assert.ok(queueMessage(run, 'also add tests'))
+  assert.ok(queueMessage(run, 'and docs'))
   release()
-  await until(() => first.done)
-
-  const types = first.events.map((e) => e.type)
-  assert.deepEqual(types, ['queued', 'queued', 'text', 'next', 'done'])
-  const next = getRun(first.events.find((e) => e.type === 'next').runId)
-  await until(() => next.done)
-  assert.deepEqual(prompts, [
-    { prompt: 'build it', resume: SESSION_ID },
-    { prompt: 'also add tests\n\nand docs', resume: SESSION_ID },
-  ])
-  assert.equal(next.events.at(-1).type, 'done')
-  assert.equal(next.events.some((e) => e.type === 'next'), false)
+  await until(() => run.done)
+  assert.deepEqual(seen, ['build it', 'also add tests', 'and docs'])
+  assert.deepEqual(run.events.map((e) => e.type), ['queued', 'queued', 'taken', 'taken', 'text', 'done'])
 })
 
 test('a reply stays open while its subagents run, and their results arrive as the next turn', async () => {
@@ -281,33 +273,41 @@ test("Claude's questions reach the page, and the answers go back the way AskUser
   assert.deepEqual(run.events.filter((e) => e.type === 'answered').map((e) => e.choice), ['answer', 'deny'])
 })
 
-test('a chat runs in the mode you picked, can switch mid-reply, and keeps it for what you queued', async () => {
-  const started = []
+test('a chat runs in the mode you picked, and switching mid-reply settles what is already waiting', async () => {
   const switched = []
-  let release
+  let started
+  const answers = []
   const query = ({ options }) => {
-    started.push(options.permissionMode)
+    started = options.permissionMode
     const stream = (async function* () {
-      if (started.length === 1) await new Promise((resolve) => (release = resolve))
+      const ask = (name) => options.canUseTool(name, { file_path: '/tmp/x' }, { signal: new AbortController().signal })
+      // Two waiting at once: an edit, and a shell command.
+      const edit = ask('Edit').then((r) => answers.push(['Edit', r.behavior]))
+      const bash = ask('Bash').then((r) => answers.push(['Bash', r.behavior]))
+      await edit
+      await bash
       yield { type: 'result', is_error: false, total_cost_usd: 0 }
     })()
     stream.setPermissionMode = async (mode) => switched.push(mode)
     return stream
   }
   const run = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID, mode: 'plan' }, 'look first', { query })
-  await until(() => release)
+  await until(() => run.pending.size === 2)
+  assert.equal(started, 'plan')
+  // Auto-edit lets the edit through and leaves the command with you…
   assert.equal(await setRunMode(run.id, 'acceptEdits'), true)
-  queueMessage(run, 'now do it')
-  release()
+  await until(() => answers.length === 1)
+  assert.deepEqual(answers, [['Edit', 'allow']])
+  assert.equal(run.pending.size, 1)
+  // …and Allow all lets the rest go.
+  await setRunMode(run.id, 'bypassPermissions')
   await until(() => run.done)
-  const next = getRun(run.events.find((e) => e.type === 'next').runId)
-  await until(() => next.done)
-
-  assert.deepEqual(started, ['plan', 'acceptEdits'])
-  assert.deepEqual(switched, ['acceptEdits'])
+  assert.deepEqual(answers, [['Edit', 'allow'], ['Bash', 'allow']])
+  assert.deepEqual(switched, ['acceptEdits', 'bypassPermissions'])
   assert.equal(await setRunMode(run.id, 'plan'), false) // finished: nothing to switch
   assert.equal(modeOf('rm -rf'), 'default')
-  assert.equal(modeOf('bypassPermissions'), 'bypassPermissions')
+  assert.equal(settledBy('dontAsk', 'Bash'), 'deny')
+  assert.equal(settledBy('default', 'Bash'), '')
 })
 
 test('Stop ends a reply and turns down the approval it was waiting on', async () => {
@@ -385,4 +385,30 @@ test('renaming writes Claude Code its own custom title, which the scan then read
     const [thread] = await claudeCode.scanThreads()
     assert.equal(thread.title, 'Auth rewrite')
   })
+})
+
+test('a session with a schedule is kept between ticks, and takes messages straight away', async () => {
+  const seen = []
+  const query = ({ prompt, options }) =>
+    (async function* () {
+      const messages = prompt[Symbol.asyncIterator]()
+      const stop = options.hooks.Stop[0].hooks[0]
+      for (;;) {
+        const next = await messages.next()
+        if (next.done) return
+        seen.push(next.value.message.content)
+        yield said(`ok ${next.value.message.content}`)
+        // The skill schedules itself on its first turn and clears it when told to stop.
+        await stop({ session_crons: seen.at(-1) === 'stop' ? [] : [{ id: 'c1', schedule: '7 8 * * 1-5', recurring: true, prompt: '/pr-watch tick' }] })
+        yield { type: 'result', is_error: false, total_cost_usd: 0 }
+      }
+    })()
+  const run = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID }, '/pr-watch', { query })
+  await until(() => run.scheduled)
+  assert.equal(run.done, false)
+  assert.equal(chatStatus(THREAD_ID), '')
+  assert.ok(queueMessage(run, 'stop'))
+  await until(() => run.done)
+  assert.deepEqual(seen, ['/pr-watch', 'stop'])
+  assert.equal(run.events.at(-1).type, 'done')
 })

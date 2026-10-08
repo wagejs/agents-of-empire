@@ -12,6 +12,7 @@
 import { chatAttach, chatCommands, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop } from '../game/api.js'
 import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
+import { LinkPanel } from './link-panel.js'
 
 const TEMPLATE = `
 <div class="sheet panel">
@@ -77,32 +78,6 @@ function toolLine(name, summary) {
     el.classList.toggle('open')
   })
   return el
-}
-
-/**
- * Open `url` in one reused popup window, the chat's size, just to its right. A real window, not
- * an iframe: GitHub and most sites refuse to be framed, and a window keeps your own logins.
- * Screen coordinates are the page's offset on screen plus the chat's place in the page.
- * ponytail: the browser chrome height is guessed from outer − inner, which is exact on macOS
- * Chrome and close enough elsewhere.
- */
-let linkWindow = null
-function openBeside(url, rect) {
-  const chromeX = window.screenX + (window.outerWidth - window.innerWidth)
-  const chromeY = window.screenY + (window.outerHeight - window.innerHeight)
-  const width = Math.round(rect.width)
-  const height = Math.round(rect.height)
-  const left = Math.round(Math.min(chromeX + rect.right + 8, screen.availLeft + screen.availWidth - width))
-  const top = Math.round(chromeY + rect.top)
-  // A window showing another site can no longer be moved from here, so a new link gets a new
-  // window, in the right place, where the chat is now.
-  if (linkWindow && !linkWindow.closed) linkWindow.close()
-  // Opened blank and cut loose before the site loads, so the site cannot reach back into this page.
-  linkWindow = window.open('about:blank', 'bot-crossing-link', `popup,width=${width},height=${height},left=${left},top=${top}`)
-  // Blocked: a plain tab is better than nothing.
-  if (!linkWindow) return window.open(url, '_blank', 'noopener')
-  linkWindow.opener = null
-  linkWindow.location.href = url
 }
 
 const STORE_KEY = 'bot-crossing.chat'
@@ -204,12 +179,12 @@ export class Chat {
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
     this.log = this.$('.chat-log')
-    // A link Claude gives, a PR say, opens in a browser popup beside the chat rather than a tab.
+    // A link Claude gives, a PR say, opens in a panel beside the chat rather than a tab.
     this.log.addEventListener('click', (e) => {
       const link = e.target.closest?.('a[href^="http"]')
       if (!link || e.metaKey || e.ctrlKey || e.shiftKey) return
       e.preventDefault()
-      openBeside(link.href, this.sheet.getBoundingClientRect())
+      this.linkPanel.open(link.href)
     })
     this.input = this.$('textarea')
 
@@ -222,6 +197,12 @@ export class Chat {
     this.$('.model-pick').addEventListener('change', (e) => this.pickModel(e.target.value))
 
     this.sheet = this.$('.sheet')
+    this.linkPanel = new LinkPanel(this.el)
+    // The panel is the chat's size, whatever you have dragged the chat to.
+    new ResizeObserver(() => {
+      this.linkPanel.el.style.width = `${this.sheet.offsetWidth}px`
+      this.linkPanel.el.style.height = `${this.sheet.offsetHeight}px`
+    }).observe(this.sheet)
     this.sizes = loadSizes()
     this.sizeKey = ''
     new ResizeObserver(() => {
@@ -257,7 +238,8 @@ export class Chat {
     // The page's own key handler already ignores a textarea, so only these two need handling.
     this.input.addEventListener('keydown', (e) => {
       if (this.slashKey(e)) return
-      if (e.key === 'Escape') this.close()
+      // Escape closes the link panel first, then the chat.
+      if (e.key === 'Escape') this.linkPanel.isOpen ? this.linkPanel.close() : this.close()
       else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault()
         this.send()
@@ -358,6 +340,7 @@ export class Chat {
   }
 
   close() {
+    this.linkPanel.close()
     this.el.classList.remove('open')
     remember(null)
   }
@@ -713,6 +696,10 @@ export class Chat {
     if (event.type === 'model') return this.showModel(event.model)
     this.live = null
     if (event.type === 'queued') this.add('user', event.text).classList.add('queued')
+    // Claude Code has it now: the oldest message still waiting is no longer waiting.
+    else if (event.type === 'taken') this.log.querySelector('.msg.user.queued')?.classList.remove('queued')
+    // A turn that ended has taken in everything typed before it, whatever said so or did not.
+    else if (event.type === 'idle') for (const el of this.log.querySelectorAll('.msg.user.queued')) el.classList.remove('queued')
     else if (event.type === 'text') reply.append(markdown(event.text))
     else if (event.type === 'tool') reply.append(toolLine(event.name, event.summary))
     else if (event.type === 'note') reply.append(div('tool', event.text))
@@ -783,7 +770,40 @@ export class Chat {
       })
       box.append(options, other)
       card.append(box)
-      return { q, answer: () => other.value.trim() || [...chosen].join(', ') }
+      return { q, box, options, answer: () => other.value.trim() || [...chosen].join(', ') }
+    })
+    // One question at a time, however many came: Prev and Next between them, and the answers
+    // all go together from the last one.
+    let at = 0
+    const nav = div('ask-nav')
+    const prev = document.createElement('button')
+    prev.type = 'button'
+    prev.className = 'btn'
+    prev.textContent = '‹ Prev'
+    const count = div('ask-count')
+    const next = document.createElement('button')
+    next.type = 'button'
+    next.className = 'btn'
+    next.textContent = 'Next ›'
+    nav.append(prev, count, next)
+    const show = (i) => {
+      at = Math.max(0, Math.min(picks.length - 1, i))
+      picks.forEach((p, n) => (p.box.hidden = n !== at))
+      count.textContent = `${at + 1} of ${picks.length}${picks.map((p) => p.answer()).filter(Boolean).length ? ` · ${picks.filter((p) => p.answer()).length} answered` : ''}`
+      prev.disabled = at === 0
+      next.hidden = at === picks.length - 1
+      answer.hidden = at !== picks.length - 1
+    }
+    prev.addEventListener('click', () => show(at - 1))
+    next.addEventListener('click', () => show(at + 1))
+    // Picking the one answer a question takes moves on to the next.
+    picks.forEach((p, n) => {
+      p.options.addEventListener('click', (e) => {
+        if (!e.target.closest('.ask-option')) return
+        if (!p.q.multiSelect && n < picks.length - 1) setTimeout(() => show(n + 1), 180)
+        else show(n)
+      })
+      p.box.querySelector('.ask-other').addEventListener('input', () => show(n))
     })
     const buttons = div('pair')
     const send = (answers) => async () => {
@@ -798,11 +818,12 @@ export class Chat {
     const answer = document.createElement('button')
     answer.type = 'button'
     answer.className = 'btn primary'
-    answer.textContent = 'Answer'
+    answer.textContent = picks.length > 1 ? 'Submit all' : 'Answer'
     answer.addEventListener('click', () => {
       const answers = Object.fromEntries(picks.map((p) => [p.q.question, p.answer()]).filter(([, a]) => a))
       if (Object.keys(answers).length < picks.length) {
         status.textContent = 'Pick or type an answer for each question'
+        show(picks.findIndex((p) => !p.answer()))
         return
       }
       send(answers)()
@@ -813,9 +834,12 @@ export class Chat {
     skip.textContent = 'Skip'
     skip.addEventListener('click', send(null))
     buttons.append(answer, skip)
+    if (picks.length > 1) card.append(nav)
     card.append(buttons)
+    show(0)
     card.settle = (choice, answers) => {
       card.classList.add('answered')
+      nav.hidden = true
       status.textContent =
         choice === 'answer' && answers
           ? Object.entries(answers).map(([q, a]) => `${q} → ${a}`).join('\n')

@@ -40,11 +40,19 @@ export const activeRun = (sessionId) =>
 
 export const getRun = (runId) => runs.get(runId) || null
 
-/** What a thread's chat is doing, for the map: waiting on an approval, working, or nothing. */
+/**
+ * What a thread's chat is doing, for the map: waiting on an approval, working, or nothing. A
+ * session kept for its schedule is nothing between ticks, so the bot is not shown busy all day.
+ */
 export function chatStatus(threadId) {
   const run = [...runs.values()].find((r) => !r.done && r.threadId === threadId)
-  return run ? (run.pending.size ? 'approval' : 'running') : ''
+  if (!run) return ''
+  return run.pending.size ? 'approval' : run.scheduled ? '' : 'running'
 }
+
+/** The sessions being kept for their schedules, for the page to list. */
+export const scheduledRuns = () =>
+  [...runs.values()].filter((r) => !r.done && r.crons?.length).map((r) => ({ runId: r.id, threadId: r.threadId, crons: r.crons }))
 
 /**
  * Watch a run: every event from index `from` on, then each new one as it happens, then `end`
@@ -69,6 +77,12 @@ export function attachRun(run, from, write, end) {
  * of this module, from before replies kept a queue: nothing would ever send what it held.
  */
 export function queueMessage(run, text) {
+  // Straight into the open session, as typing into a terminal mid-reply is: Claude Code takes
+  // it in at its next step, without the reply having to finish or be stopped first.
+  if (run.inbox?.push(text)) {
+    record(run, { type: 'queued', text })
+    return true
+  }
   if (!Array.isArray(run.queue)) return false
   run.queue.push(text)
   record(run, { type: 'queued', text })
@@ -239,7 +253,26 @@ export async function setRunMode(runId, mode) {
   run.mode = modeOf(mode)
   await run.session.setPermissionMode(run.mode)
   record(run, { type: 'mode', mode: run.mode })
+  // What is already waiting is settled by the new mode too, as if it had been asked under it:
+  // otherwise switching to Allow all leaves the reply stuck on the card that made you switch.
+  for (const id of [...run.pending]) {
+    const waiting = pending.get(id)
+    if (!waiting || waiting.question) continue
+    const choice = settledBy(run.mode, waiting.name)
+    if (choice) answerPermission(id, choice)
+  }
   return true
+}
+
+/** File edits, which Auto-edit lets through without asking. */
+const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
+
+/** How a mode answers a waiting tool call: allow, deny, or '' to leave it with you. */
+export function settledBy(mode, name) {
+  if (mode === 'bypassPermissions') return 'allow'
+  if (mode === 'acceptEdits' && EDITS.has(name)) return 'allow'
+  if (mode === 'dontAsk') return 'deny'
+  return ''
 }
 
 /** Switch a running reply's model. It applies from Claude's next request on. */
@@ -292,18 +325,31 @@ const BACKGROUND_LIMIT_MS = 30 * 60_000
  * ends, and with it any subagent still running in the background, which then never reports
  * back. Held open, a finished subagent's result arrives as a new turn, as it does in the app.
  */
-function inbox(first) {
+function inbox(first, taken = () => {}) {
   const items = [first]
+  let given = 0
   let wake = null
   let closed = false
   return {
+    /** Hand the session another message while it is open; false once it has closed. */
+    push(text) {
+      if (closed) return false
+      items.push(text)
+      wake?.()
+      return true
+    },
     close() {
       closed = true
       wake?.()
     },
     async *[Symbol.asyncIterator]() {
       for (;;) {
-        while (items.length) yield { type: 'user', message: { role: 'user', content: items.shift() }, parent_tool_use_id: null }
+        while (items.length) {
+          const content = items.shift()
+          // Everything after the first message is one you typed while it worked: say it is in.
+          if (given++) taken()
+          yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null }
+        }
         if (closed) return
         await new Promise((resolve) => (wake = resolve))
         wake = null
@@ -314,7 +360,9 @@ function inbox(first) {
 
 async function drive(run, target, text, query) {
   const write = (event) => record(run, event)
-  const input = inbox(text)
+  const input = (run.inbox = inbox(text, () => write({ type: 'taken' })))
+  /** The session's own schedule (CronCreate, /loop), as Claude Code reports it at each turn's end. */
+  run.crons = []
   const stop = () => {
     for (const id of [...run.pending]) answerPermission(id, 'deny')
     input.close()
@@ -345,6 +393,7 @@ async function drive(run, target, text, query) {
       }
       pending.set(id, {
         run,
+        name,
         resolve: (choice) => {
           if (choice === 'deny') return resolve({ behavior: 'deny', message: denial(name) })
           const saved = choice === 'always' && always.updates.length ? { updatedPermissions: always.updates } : {}
@@ -380,6 +429,11 @@ async function drive(run, target, text, query) {
         abortController: run.abort,
         canUseTool,
         includePartialMessages: true,
+        // Each turn's end says what the session has scheduled. While anything is, the session is
+        // kept: its timers live in this process, and so do the questions they bring.
+        hooks: {
+          Stop: [{ hooks: [async (hook) => ((run.crons = hook.session_crons || []), { continue: true })] }],
+        },
       },
     }))
     const block = { streamed: false }
@@ -406,6 +460,10 @@ async function drive(run, target, text, query) {
       if (msg.type === 'assistant' || msg.type === 'stream_event') {
         idleSince = 0
         clearTimeout(settle)
+        if (run.scheduled) {
+          run.scheduled = false
+          write({ type: 'note', text: 'Working again: a scheduled tick, or a result coming back' })
+        }
       }
       // Which model is replying: the page shows it in the chat's header.
       if (msg.type === 'system' && msg.subtype === 'init' && msg.model) write({ type: 'model', model: msg.model })
@@ -425,7 +483,16 @@ async function drive(run, target, text, query) {
         // that ends with subagents still going leaves the run open for their results.
         ended = event
         idleSince ||= Date.now()
-        if (!background) finish()
+        // A turn's end is a turn's end, for the page, even when the session stays.
+        if (!event.ok) write({ type: 'note', text: event.error || 'That turn failed' })
+        if (run.crons.length) {
+          // ponytail: kept until Stop or until the schedule is empty; the Bot Crossing server
+          // stopping ends it too, as closing the terminal would.
+          clearTimeout(settle)
+          run.scheduled = true
+          write({ type: 'note', text: `Waiting for the schedule: ${run.crons.map((c) => `${c.schedule} ${c.prompt.slice(0, 40)}`).join('; ')}` })
+          write({ type: 'idle' })
+        } else if (!background) finish()
         else if (Date.now() - idleSince > BACKGROUND_LIMIT_MS) finish()
         else {
           write({ type: 'note', text: `Waiting on ${background} background task${background === 1 ? '' : 's'}; their results come back here` })

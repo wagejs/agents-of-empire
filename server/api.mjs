@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
+import { previewLink } from './link.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, modelOf, setRunModel, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
 import {
@@ -464,6 +465,11 @@ async function chat(pathname, req, res) {
   if (pathname === '/api/chat/model') {
     const ok = await setRunModel(String(body.runId || ''), body.model)
     return send(res, ok ? 200 : 404, ok ? { ok } : { ok, error: 'That reply has already finished' })
+  }
+
+  /** What the chat's link panel should show for a link a reply gave: a PR, an issue, or a page. */
+  if (pathname === '/api/chat/link') {
+    return send(res, 200, await previewLink(String(body.url || '')))
   }
 
   if (pathname === '/api/chat/stop') {

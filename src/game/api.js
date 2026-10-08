@@ -142,6 +142,9 @@ export const chatCommands = ({ thread, folder }) =>
   post('/api/chat/commands', thread ? { harness: thread.harness, ref: thread.ref } : { folder })
 
 /** Switch a running reply's model. */
+/** What the chat's link panel shows for a link: a GitHub PR or issue, a framable page, or neither. */
+export const chatLink = (url) => post('/api/chat/link', { url })
+
 export const chatModel = (runId, model) => post('/api/chat/model', { runId, model })
 
 /** Switch a running reply's permission mode. */
