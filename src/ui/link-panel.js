@@ -72,7 +72,40 @@ export class LinkPanel {
     this.url = null
   }
 
+  /**
+   * A document rather than a link: Claude's plan, say. `actions` is an element of buttons for
+   * the panel's foot, or nothing. Returns the body, for whoever wants to update it.
+   */
+  showDoc({ title, sub = '', markdown, actions = null, key = '' }) {
+    this.url = null
+    this.docKey = key
+    this.el.hidden = false
+    this.el.parentElement?.classList.add('with-link')
+    this.$('[data-out]').hidden = true
+    this.$('.title').textContent = title
+    this.$('.sub').textContent = sub
+    const body = this.$('.link-body')
+    body.replaceChildren(md(markdown))
+    this.$('.link-foot')?.remove()
+    if (actions) {
+      actions.classList.add('link-foot')
+      this.el.append(actions)
+    }
+    body.scrollTop = 0
+  }
+
+  /** Change the second line of a document still showing, as a plan gets approved. */
+  noteDoc(key, sub) {
+    if (this.isOpen && this.docKey === key) {
+      this.$('.sub').textContent = sub
+      this.$('.link-foot')?.remove()
+    }
+  }
+
   async open(url) {
+    this.docKey = ''
+    this.$('.link-foot')?.remove()
+    this.$('[data-out]').hidden = false
     this.url = url
     this.el.hidden = false
     this.el.parentElement?.classList.add('with-link')

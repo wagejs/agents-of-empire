@@ -192,6 +192,8 @@ const DEFAULTS = {
 
   // Behaviour
   autoQuality: true, // drop render scale when frames get expensive
+  /** Frame cap: '30' | '60' | '0' (display refresh). 30 is plenty for a window left open all day. */
+  maxFps: '30',
   autoFrame: false, // ease the camera back to isometric when you stop dragging; opt-in
   // On by default: picking a bot is nearly always the start of watching it, and having to find
   // the toggle first meant the one you clicked had usually walked off before you got there.

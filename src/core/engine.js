@@ -353,6 +353,10 @@ export class Engine {
     this.tiltShift?.setFocusDistance(distance)
   }
 
+  _fpsCap() {
+    return Number(this.settings.get('maxFps')) || 0
+  }
+
   _targetScale() {
     return this.settings.get('renderScale') * (window.devicePixelRatio || 1)
   }
@@ -370,6 +374,15 @@ export class Engine {
   }
 
   _loop() {
+    // Frame cap. rAF fires at the display's refresh (120 on ProMotion) and every tick is a full
+    // simulate + draw, so an always-open ambient window burns CPU and GPU for frames nobody needs.
+    // The 1ms slack keeps a 60 cap on a 60Hz panel from landing a hair early and halving to 30.
+    const cap = this._fpsCap()
+    if (cap) {
+      const now = performance.now()
+      if (now - (this._lastFrame || 0) < 1000 / cap - 1) return
+      this._lastFrame = now
+    }
     this.timer.update()
     // The timer already zeroes the delta across a hidden tab; the clamp is the backstop for
     // an ordinary long frame, so one stalled frame never jumps the whole colony forward.
@@ -431,8 +444,10 @@ export class Engine {
     const floor = Math.min(ceiling, 0.35 * (window.devicePixelRatio || 1))
 
     // Sustained evidence, not one sample: 3 slow seconds to drop, 8 fast ones to climb.
-    this._slow = fps < 45 ? (this._slow || 0) + 1 : 0
-    this._fast = fps > 58 ? (this._fast || 0) + 1 : 0
+    // Judged against the frame cap, or a capped 30 would read as "slow" forever.
+    const target = this._fpsCap() || 60
+    this._slow = fps < target * 0.75 ? (this._slow || 0) + 1 : 0
+    this._fast = fps > target * 0.97 ? (this._fast || 0) + 1 : 0
     const dpr = window.devicePixelRatio || 1
 
     let next = current

@@ -105,6 +105,14 @@ export function answerPermission(id, choice, answers) {
   if (!waiting) return false
   pending.delete(id)
   waiting.run.pending.delete(id)
+  // A plan is approved, with how edits go from here, or sent back with what to change.
+  if (waiting.plan) {
+    const verdict = PLAN_CHOICES.includes(choice) ? choice : 'keep'
+    const feedback = typeof answers === 'string' ? answers.trim().slice(0, 4000) : ''
+    record(waiting.run, { type: 'answered', id, choice: verdict, feedback })
+    waiting.resolve(verdict, feedback)
+    return true
+  }
   // A question takes its answers, one string per question text; anything else skips it.
   if (waiting.question) {
     const given = answersFor(waiting.question, answers)
@@ -117,6 +125,12 @@ export function answerPermission(id, choice, answers) {
   waiting.resolve(answer)
   return true
 }
+
+/**
+ * What a plan can be told, as Claude Code's own plan prompt offers it: go ahead and take edits
+ * without asking, go ahead but ask before each edit, or keep planning.
+ */
+export const PLAN_CHOICES = ['acceptEdits', 'default', 'keep']
 
 /**
  * The page's answers to Claude's questions, kept only for questions actually asked and only as
@@ -257,7 +271,8 @@ export async function setRunMode(runId, mode) {
   // otherwise switching to Allow all leaves the reply stuck on the card that made you switch.
   for (const id of [...run.pending]) {
     const waiting = pending.get(id)
-    if (!waiting || waiting.question) continue
+    // A plan is yours to read, whatever the mode: switching never approves one.
+    if (!waiting || waiting.question || waiting.plan) continue
     const choice = settledBy(run.mode, waiting.name)
     if (choice) answerPermission(id, choice)
   }
@@ -374,6 +389,31 @@ async function drive(run, target, text, query) {
       const id = randomUUID()
       const always = alwaysRule(suggestions)
       run.pending.add(id)
+      // Plan mode presenting its plan: shown to you as a document, approved or sent back.
+      if (name === 'ExitPlanMode') {
+        pending.set(id, {
+          run,
+          plan: true,
+          resolve: async (verdict, feedback) => {
+            if (verdict === 'keep') {
+              return resolve({
+                behavior: 'deny',
+                message: feedback
+                  ? `The user wants changes to the plan before approving it:\n${feedback}`
+                  : 'The user did not approve the plan yet. Keep planning, and ask what to change if it is unclear.',
+              })
+            }
+            resolve({ behavior: 'allow', updatedInput: input })
+            // Out of plan mode into the mode you picked, as the terminal's own prompt does.
+            run.mode = verdict
+            await run.session?.setPermissionMode(verdict).catch(() => {})
+            record(run, { type: 'mode', mode: verdict })
+          },
+        })
+        toolSignal?.addEventListener('abort', () => answerPermission(id, 'keep'), { once: true })
+        write({ type: 'plan', id, plan: String(input?.plan || ''), file: input?.planFilePath || '' })
+        return
+      }
       // Claude asking you something: shown as a question with its options, answered from there.
       if (name === 'AskUserQuestion') {
         const questions = Array.isArray(input?.questions) ? input.questions : []

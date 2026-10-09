@@ -412,3 +412,36 @@ test('a session with a schedule is kept between ticks, and takes messages straig
   assert.deepEqual(seen, ['/pr-watch', 'stop'])
   assert.equal(run.events.at(-1).type, 'done')
 })
+
+test('a plan waits for you: approved into the mode you pick, or sent back with what to change', async () => {
+  const outcomes = []
+  const modes = []
+  const query = ({ options }) => {
+    const stream = (async function* () {
+      const plan = (text) => options.canUseTool('ExitPlanMode', { plan: text }, { signal: new AbortController().signal })
+      outcomes.push(await plan('# First go'))
+      outcomes.push(await plan('# Second go'))
+      yield { type: 'result', is_error: false, total_cost_usd: 0 }
+    })()
+    stream.setPermissionMode = async (mode) => modes.push(mode)
+    return stream
+  }
+  const run = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID, mode: 'plan' }, 'plan it', { query })
+  await until(() => run.events.some((e) => e.type === 'plan'))
+  assert.equal(run.events.find((e) => e.type === 'plan').plan, '# First go')
+  assert.equal(chatStatus(THREAD_ID), 'approval') // the bot needs you while it waits
+  // Switching mode never approves a plan for you.
+  await setRunMode(run.id, 'bypassPermissions')
+  assert.equal(run.pending.size, 1)
+  const first = run.events.find((e) => e.type === 'plan').id
+  assert.ok(answerPermission(first, 'keep', 'split step 2 in two'))
+  await until(() => run.events.filter((e) => e.type === 'plan').length === 2)
+  const second = run.events.filter((e) => e.type === 'plan')[1].id
+  assert.ok(answerPermission(second, 'acceptEdits'))
+  await until(() => run.done)
+  assert.equal(outcomes[0].behavior, 'deny')
+  assert.match(outcomes[0].message, /split step 2 in two/)
+  assert.equal(outcomes[1].behavior, 'allow')
+  assert.equal(run.mode, 'acceptEdits')
+  assert.deepEqual(modes, ['bypassPermissions', 'acceptEdits'])
+})

@@ -322,6 +322,15 @@ async function scanLiveSessions() {
       /* process is gone */
     }
   }
+  // The sessions Bot Crossing runs itself, from the chat. Their Claude Code processes do not
+  // write to the registry above, so without this a session the page is driving reads as not
+  // running at all, and its subagents never get looked for. Read off the chat's own registry,
+  // shared on `globalThis` (see server/chat.mjs), rather than imported: chat imports this file.
+  for (const run of globalThis[Symbol.for('bot-crossing.chat')]?.runs?.values() || []) {
+    if (run.done || !run.sessionId) continue
+    const status = run.scheduled ? 'idle' : 'busy'
+    if (status === 'busy' || !live.has(run.sessionId)) live.set(run.sessionId, status)
+  }
   return live
 }
 

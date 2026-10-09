@@ -705,7 +705,8 @@ export class Chat {
     else if (event.type === 'note') reply.append(div('tool', event.text))
     else if (event.type === 'permission') reply.append(this.permission(event))
     else if (event.type === 'question') reply.append(this.question(event))
-    else if (event.type === 'answered') [...reply.querySelectorAll('.perm')].find((c) => c.dataset.id === event.id)?.settle(event.choice, event.answers)
+    else if (event.type === 'plan') reply.append(this.planCard(event))
+    else if (event.type === 'answered') [...reply.querySelectorAll('.perm')].find((c) => c.dataset.id === event.id)?.settle(event.choice, event.answers ?? event.feedback)
     else if (event.type === 'done' && !event.ok) reply.append(div('err', event.error || 'Something went wrong'))
     if (following) this.scroll()
   }
@@ -845,6 +846,78 @@ export class Chat {
           ? Object.entries(answers).map(([q, a]) => `${q} → ${a}`).join('\n')
           : choice === 'deny' ? 'Skipped' : 'Not answered: the reply ended first'
     }
+    return card
+  }
+
+  /**
+   * Claude's plan, waiting for you. The plan itself opens beside the chat as a document, at once
+   * and whenever this chat is opened while it still waits; the card and the panel both carry the
+   * three answers Claude Code's own plan prompt has, and Keep planning takes what to change.
+   */
+  planCard({ id, plan }) {
+    const threadId = this.thread?.id
+    const card = div('perm plan')
+    card.dataset.id = id
+    const status = div('perm-q', 'Claude has a plan for you to approve')
+    const view = document.createElement('button')
+    view.type = 'button'
+    view.className = 'btn'
+    view.textContent = 'Read the plan'
+    const title = (plan.match(/^#\s+(.+)$/m) || [])[1] || 'Plan'
+    const answering = { done: false }
+    const buttons = () => {
+      const row = div('pair plan-actions')
+      const feedback = document.createElement('textarea')
+      feedback.className = 'ask-other'
+      feedback.rows = 2
+      feedback.placeholder = 'Keep planning: what should change? (optional)'
+      const btn = (label, cls, choice) => {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = `btn ${cls}`
+        b.textContent = label
+        b.addEventListener('click', async () => {
+          if (answering.done) return
+          for (const x of row.querySelectorAll('button, textarea')) x.disabled = true
+          try {
+            await chatPermission(id, choice, choice === 'keep' ? feedback.value : undefined)
+            card.settle(choice, feedback.value)
+          } catch (err) {
+            status.textContent = err.message
+            for (const x of row.querySelectorAll('button, textarea')) x.disabled = false
+          }
+        })
+        return b
+      }
+      row.append(
+        btn('Approve, auto-accept edits', 'primary', 'acceptEdits'),
+        btn('Approve, ask before edits', '', 'default'),
+        btn('Keep planning', '', 'keep'),
+        feedback
+      )
+      return row
+    }
+    const show = () => this.linkPanel.showDoc({ title, sub: answering.done ? answering.note : 'Waiting for your approval', markdown: plan, actions: answering.done ? null : buttons(), key: id })
+    view.addEventListener('click', show)
+    const own = buttons()
+    card.append(status, view, own)
+    card.settle = (choice, feedback) => {
+      answering.done = true
+      answering.note =
+        choice === 'acceptEdits' ? 'Approved: edits go ahead without asking'
+        : choice === 'default' ? 'Approved: edits ask first'
+        : choice === 'keep' ? `Sent back${feedback ? `: ${feedback}` : ''}`
+        : 'Not answered: the reply ended first'
+      status.textContent = answering.note
+      card.classList.add('answered')
+      own.remove()
+      this.linkPanel.noteDoc(id, answering.note)
+    }
+    // Open it now: live, or replayed while it still waits. A later `answered` in the same
+    // replay settles it straight after, which leaves the panel showing it as decided.
+    // Not a microtask: a replay's `answered` can arrive a moment later, and a plan decided long
+    // ago should not pop open every time this chat does.
+    setTimeout(() => !answering.done && this.thread?.id === threadId && show(), 400)
     return card
   }
 

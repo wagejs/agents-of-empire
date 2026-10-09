@@ -1344,6 +1344,31 @@ body {
   background: #fff;
 }
 
+/* A plan's answers, in its card and under it in the panel. */
+.chat .plan-actions,
+.link-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.link-foot {
+  margin: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.plan-actions .ask-other,
+.link-foot .ask-other {
+  flex-basis: 100%;
+  resize: vertical;
+}
+
+.chat .plan .btn {
+  margin-top: 6px;
+}
+
 .link-blocked {
   display: grid;
   gap: 12px;

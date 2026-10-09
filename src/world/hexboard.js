@@ -441,6 +441,41 @@ export function subdivide(geometry, max) {
  * Build the board as one mesh, its top at `top`. Needs the medieval kit loaded; returns
  * null until it is.
  */
+/**
+ * Every run of castle wall on a board, as a straight segment in world space: from just behind
+ * a road tile's middle (so the runs of a bend overlap) out to the edge the road leaves by.
+ * A wall that reaches the castle runs on into it, so the castle stands in the wall. The board
+ * draws these, and the crew's navigation treats them as solid, from this one list.
+ */
+export function wallRuns(board) {
+  const isShip = (q, r) => q === SHIP_CELL.q && r === SHIP_CELL.r
+  const runs = []
+  for (const cell of board.values()) {
+    const near = (test) => DIR_ANGLE.filter((_, d) => test(cell.q + HEX_DIRS[d][0], cell.r + HEX_DIRS[d][1]))
+    const angles = cell.kind === 'road' ? [...cell.angles, ...near(isShip)]
+      : isShip(cell.q, cell.r) ? near((q, r) => board.get(key(q, r))?.kind === 'road')
+      : []
+    const { x, z } = hexToWorld(cell.q, cell.r)
+    for (const a of angles) {
+      const angle = (a * Math.PI) / 180
+      const back = WALL_THICK / 2
+      runs.push({
+        cell: key(cell.q, cell.r),
+        angle,
+        length: TILE_SCALE + back,
+        x0: x - Math.cos(angle) * back,
+        z0: z - Math.sin(angle) * back,
+        x1: x + Math.cos(angle) * TILE_SCALE,
+        z1: z + Math.sin(angle) * TILE_SCALE,
+      })
+    }
+  }
+  return runs
+}
+
+/** How thick a wall is, for anything that has to keep out of one. */
+export const WALL_HALF_WIDTH = WALL_THICK / 2
+
 export function createHexBoard(board, top, { smooth = true } = {}) {
   if (!hasPart('hex_grass', 'medieval')) return null
   const parts = []
@@ -451,23 +486,15 @@ export function createHexBoard(board, top, { smooth = true } = {}) {
     geo.applyMatrix4(m.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), turn), new THREE.Vector3(sx, sy, sz)))
     parts.push(geo)
   }
-  const isShip = (q, r) => q === SHIP_CELL.q && r === SHIP_CELL.r
+  const runs = hasPart(WALL, 'medieval') ? wallRuns(board) : []
+  const walled = new Set(runs.map((w) => w.cell))
+  for (const w of runs) {
+    place(WALL, (w.x0 + w.x1) / 2, (w.z0 + w.z1) / 2, -w.angle, w.length / 2, WALL_SCALE, top, WALL_SCALE)
+  }
   for (const cell of board.values()) {
     const { x, z } = hexToWorld(cell.q, cell.r)
-    // A wall that reaches the castle runs on into it, so the castle stands in the wall.
-    const near = (test) => DIR_ANGLE.filter((_, d) => test(cell.q + HEX_DIRS[d][0], cell.r + HEX_DIRS[d][1]))
-    const walls = cell.kind === 'road' ? [...cell.angles, ...near(isShip)]
-      : isShip(cell.q, cell.r) ? near((q, r) => board.get(key(q, r))?.kind === 'road')
-      : []
-    if (walls.length && hasPart(WALL, 'medieval')) {
+    if (walled.has(key(cell.q, cell.r))) {
       place('hex_grass', x, z, -Math.PI / 6, TILE_SCALE, TILE_DEPTH)
-      // From just behind the middle, so the runs of a bend overlap, out to the tile's edge.
-      const length = TILE_SCALE + WALL_THICK / 2
-      const mid = (TILE_SCALE - WALL_THICK / 2) / 2
-      for (const a of walls) {
-        const rad = (a * Math.PI) / 180
-        place(WALL, x + Math.cos(rad) * mid, z + Math.sin(rad) * mid, -rad, length / 2, WALL_SCALE, top, WALL_SCALE)
-      }
       continue
     }
     const tile = TILES[cell.kind] && tileFor(cell.angles, TILES[cell.kind])

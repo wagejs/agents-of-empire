@@ -8,7 +8,7 @@ import { createGrass } from '../world/grass.js'
 import { createSkyIsland } from '../world/skyisland.js'
 import { SKY_MARGIN, SKY_MAX_CELLS, setIslandFootprint } from '../world/planet.js'
 import { createHexIsland } from '../world/hexisland.js'
-import { blockedByMap, boardMap, createHexBoard, growTown, layoutBoard, layoutFromMap, townGrowth } from '../world/hexboard.js'
+import { WALL_HALF_WIDTH, blockedByMap, boardMap, createHexBoard, growTown, layoutBoard, layoutFromMap, townGrowth, wallRuns } from '../world/hexboard.js'
 import { bendPoint } from '../core/curve.js'
 import { Sky } from '../world/sky.js'
 import {
@@ -264,6 +264,8 @@ export class Colony {
     if (!this.board) return // the kit is not in yet; `onAssetsReady` builds the terrain again
     this.boardCells = cells
     this.worldGroup.add(this.board)
+    // The walls just moved, or arrived: the crew has to know where they are now.
+    if (this.nav) this._rebuildNavigation()
   }
 
   /** Where the drones fly between: the lander, and every building with anyone at it. */
@@ -866,6 +868,18 @@ export class Colony {
       // The grid blocks less than the whole footprint so the gaps stay walkable; the
       // keep radius is where the crew is actually held to — see `Navigation.repel`.
       obstacles.push({ x: p.x, z: p.z, r, keep: footprint * 0.92 + AGENT_RADIUS })
+    }
+    // The town wall. A row of posts along every run, close enough that no gap between them
+    // lets anyone through, both routed round and held to, so nobody wanders out of town.
+    if (this.boardCells) {
+      const r = WALL_HALF_WIDTH
+      for (const w of wallRuns(this.boardCells)) {
+        const steps = Math.ceil(w.length / r)
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps
+          obstacles.push({ x: w.x0 + (w.x1 - w.x0) * t, z: w.z0 + (w.z1 - w.z0) * t, r: r + TRAVEL_RADIUS, keep: r + AGENT_RADIUS })
+        }
+      }
     }
     // Ground clutter counts too. A crate is only knee-high, but an astronaut walking
     // straight through one is exactly as wrong as one walking through a habitat.
