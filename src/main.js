@@ -8,6 +8,7 @@ import { Hud } from './ui/hud.js'
 import { PLOT_PALETTE, hashString } from './world/plots.js'
 import { Chat, lastChat } from './ui/chat.js'
 import { Search } from './ui/search.js'
+import { PlanPanel } from './ui/plan-panel.js'
 import { PLANETS } from './world/planet.js'
 import { DECK_TOP, PLOT_CELL, hexToWorld, worldToHex } from './world/plots.js'
 import { planMove } from './world/plot-move.js'
@@ -154,6 +155,14 @@ const actions = {
 
   /** The legend, and anything else that means "show me this repo". */
   pickProject: (name) => selectProject(name, { fly: true }),
+  // From the Orchestrations tab: fly to that session's astronaut and keep the camera on it.
+  // Not `openThread`: that one already opens the selected thread in its harness.
+  trackThread: (thread) => {
+    select(thread.id, { fly: true })
+    const agent = colony.agentFor(thread.id)
+    if (agent) rig.setFollow(agent)
+    else hud.toast(`${thread.share?.repo || 'That session'} is not on the map (its repo may be hidden)`)
+  },
 
   /** Back out of one repo to the list of all of them. The panel itself never leaves. */
   closeProject: () => {
@@ -166,6 +175,7 @@ const actions = {
 
   focusThread: (id) => select(id, { fly: true }),
   openSearch: () => search.open(),
+  openPlan: () => planPanel.open(),
 
   /**
    * A new thread in this repo. The desktop app opens an empty session with the folder as
@@ -388,6 +398,14 @@ function needYouThreads() {
   return threads.filter((t) => t.canChat && waiting.has(t.id)).sort((a, b) => b.lastActivityAt - a.lastActivityAt)
 }
 
+const planPanel = new PlanPanel(hud.el, {
+  // The orchestrator's reply shows in the chat as it runs; it lands on the map with the next scan.
+  onStarted: ({ runId, folder, title }) => {
+    chat.openRun({ runId, folder, title })
+    setTimeout(poll, 6000)
+  },
+})
+
 const search = new Search(hud.el, {
   rows: searchRows,
   actions: {
@@ -495,11 +513,13 @@ function select(id, { fly = false } = {}) {
     selectedId = null
     rig.setFollow(null)
     colony.astronauts.setSelected(null)
+    hud.setRunSelected(null)
     hud.setSelection(null, null)
     syncProject()
     return
   }
   colony.astronauts.setSelected(agent)
+  hud.setRunSelected(id)
   const thread = threads.find((t) => t.id === id) || agent.thread
   hud.setSelection(agent, thread)
   // It answers. One of six little phrases, from where it is standing, never twice in a row.
@@ -969,8 +989,8 @@ window.addEventListener('keydown', (e) => {
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return
   // Nor while chatting: with focus on one of its buttons, Enter would also open the app and A
   // would archive the very thread being talked to.
-  if (chat.isOpen || search.isOpen) {
-    if (e.key === 'Escape') (chat.isOpen ? chat : search).close()
+  if (chat.isOpen || search.isOpen || planPanel.isOpen) {
+    if (e.key === 'Escape') (planPanel.isOpen ? planPanel : chat.isOpen ? chat : search).close()
     return
   }
 
@@ -1142,6 +1162,9 @@ function applyThreads(list) {
     }))
     .sort((a, b) => b.count - a.count)
 
+  hud.setRuns(shareRuns(list, archivedSet))
+  hud.setRunSelected(selectedId)
+
   // Keep the card honest if the thread it is showing changed underneath it.
   if (selectedId) {
     const still = colony.agentFor(selectedId)
@@ -1161,6 +1184,32 @@ function applyThreads(list) {
     state.plots = layout
     queueSave()
   }
+}
+
+/**
+ * The shared runs, one per plan, newest first: the orchestrator, then its repo sessions in
+ * repo order. A thread's `share` comes from the server; the rest is what the map already knows.
+ */
+function shareRuns(list, archivedSet) {
+  const now = Date.now()
+  const runs = new Map()
+  for (const t of list) {
+    if (!t.share || archivedSet.has(t.id)) continue
+    const run = runs.get(t.share.plan) || { plan: t.share.plan, rows: [], at: 0 }
+    const status = statusFor(t, now)
+    run.rows.push({
+      thread: t,
+      role: t.share.role,
+      name: t.share.role === 'orchestrator' ? 'Orchestrator' : t.share.repo || t.share.name,
+      status: STATUS_LABEL[status] || status,
+      step: t.share.role === 'child' && t.share.status !== 'running' ? t.share.status : '',
+      urgent: status === 'waiting' || status === 'blocked',
+    })
+    run.at = Math.max(run.at, t.lastActivityAt || 0)
+    runs.set(t.share.plan, run)
+  }
+  for (const run of runs.values()) run.rows.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'orchestrator' ? -1 : 1))
+  return [...runs.values()].sort((a, b) => b.at - a.at)
 }
 
 /**

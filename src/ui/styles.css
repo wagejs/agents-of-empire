@@ -850,6 +850,107 @@ body {
   display: flex;
 }
 
+.side .side-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 9px 9px 0;
+  flex: none;
+}
+
+.side .side-tabs button {
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.side .side-tabs button:hover {
+  color: var(--text);
+}
+
+.side .side-tabs button[aria-selected='true'] {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--line);
+}
+
+.side .side-tabs .tab-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.side .side-tabs .tab-count.urgent {
+  color: var(--blue);
+  opacity: 1;
+}
+
+.side .runs-pane {
+  flex: 1;
+  min-height: 0;
+  display: none;
+  flex-direction: column;
+}
+
+/* The Orchestrations tab takes the place of both repo views, the list and a drilled-in repo. */
+.side.tab-runs .runs-pane {
+  display: flex;
+}
+
+.side.tab-runs .projects-pane,
+.side.tab-runs .project-detail {
+  display: none;
+}
+
+.side .run-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 9px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.side .run {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.side .run .sec-head {
+  padding-left: 6px;
+}
+
+.side .run-row.child {
+  margin-left: 14px;
+}
+
+/* The same two colours as the role pins over the astronauts' heads. */
+.side .role-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: #e0904a;
+  box-shadow: 0 0 9px #e0904a;
+}
+
+.side .run-row.child .role-dot {
+  background: #7d78e8;
+  box-shadow: 0 0 9px #7d78e8;
+}
+
+.side .run-empty {
+  margin: 12px 6px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
 .side .sec-head {
   display: flex;
   align-items: baseline;
@@ -1864,6 +1965,31 @@ body {
 }
 
 .chat .slash-desc,
+/* The repo a chat is in, in its plot's colour: where you are after a jump between chats. */
+.chat .repo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--repo);
+}
+
+.chat .repo-tag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--repo);
+  box-shadow: 0 0 6px var(--repo);
+}
+
+.chat .repo-tag[hidden] {
+  display: none;
+}
+
 .chat .slash-empty {
   font-size: 11.5px;
   color: var(--muted);
@@ -2368,27 +2494,98 @@ kbd {
 }
 .bot-crossing-canvas { cursor: grab; }
 
-/* The repo a chat is in, in its plot's colour: where you are after a jump between chats. */
-.chat .repo-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
-  font-size: 11.5px;
+/* ── run a plan ──────────────────────────────────────────────────────────────────── */
+
+/* Shares the search modal: path box on top, the plan's repo sessions below, Start at the foot. */
+.plan-run .sheet {
+  height: auto;
+  max-height: min(720px, calc(100dvh - 40px));
+}
+
+.plan-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-hint,
+.plan-file {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-file {
+  word-break: break-all;
+}
+
+.plan-summary {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-summary > :first-child {
+  margin-top: 0;
+}
+
+.plan-summary > :last-child {
+  margin-bottom: 0;
+}
+
+.plan-warn {
+  font-size: 12px;
+  color: var(--amber);
+}
+
+.plan-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.plan-row .info {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-row .title {
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--repo);
 }
 
-.chat .repo-tag::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--repo);
-  box-shadow: 0 0 6px var(--repo);
+.plan-row .sub {
+  font-size: 12px;
+  color: var(--muted);
 }
 
-.chat .repo-tag[hidden] {
-  display: none;
+.plan-steps {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.plan-note {
+  flex: 1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-note.err {
+  color: var(--red);
+  white-space: pre-wrap;
 }

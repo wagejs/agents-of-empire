@@ -10,6 +10,8 @@ import {
   mdiSleep,
   mdiCreation,
   mdiLogout,
+  mdiSitemap,
+  mdiSourceBranch,
 } from '@mdi/js'
 
 /**
@@ -23,7 +25,7 @@ import {
  */
 
 const COLS = 4
-const ROWS = 2
+const ROWS = 3
 
 /** Where the badge's bottom edge sits: a shade above the crown of the helmet. */
 const HEAD_CLEAR = 1.42
@@ -38,6 +40,9 @@ export const BADGE = {
   sleeping: 5,
   spawning: 6,
   leaving: 7,
+  // Roles in a shared run: a second, smaller pin stacked over the status one.
+  orchestrator: 8,
+  child: 9,
 }
 
 /** HDR badge tint, tone-mapped with the scene after bloom and depth of field. */
@@ -50,7 +55,12 @@ const BADGE_COLOR = {
   5: [0.9, 1.0, 1.7],
   6: [2.4, 1.4, 0.75],
   7: [1.2, 1.3, 1.35],
+  8: [2.6, 1.15, 0.45],
+  9: [1.1, 0.95, 2.6],
 }
+
+/** A role pin's size: smaller than a status badge, so it reads as a tag on it, not a second status. */
+const ROLE_SIZE = 0.1
 
 /**
  * How readily a badge gives up its space, 0 = never fades. Ranked by how much the thing it
@@ -65,11 +75,15 @@ const FADE_BY_BADGE = {
   [BADGE.leaving]: 0.5,
   [BADGE.paused]: 0.6,
   [BADGE.sleeping]: 1,
+  [BADGE.orchestrator]: 0.3,
+  [BADGE.child]: 0.3,
 }
 
 export class Indicators {
-  constructor(scene, settings, capacity) {
+  constructor(scene, settings, agentCapacity) {
     this.settings = settings
+    // Up to two pins an agent: its status, and its role in a shared run.
+    const capacity = agentCapacity * 2
     this.capacity = capacity
     // 512 texels per badge, not per atlas — sized against the closest the camera ever gets,
     // which buildBadgeAtlas works through.
@@ -81,11 +95,15 @@ export class Indicators {
     this.sizes = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
     // 1 = a badge that may fade out at distance, 0 = one that must always be readable.
     this.fades = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
-    for (const a of [this.frames, this.centers, this.sizes, this.fades]) a.setUsage(THREE.DynamicDrawUsage)
+    // How far above its centre a pin sits, in its own heights: 0 for a status badge, enough
+    // to clear the status badge under it for a role pin.
+    this.lifts = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
+    for (const a of [this.frames, this.centers, this.sizes, this.fades, this.lifts]) a.setUsage(THREE.DynamicDrawUsage)
     geo.setAttribute('aFrame', this.frames)
     geo.setAttribute('aCenter', this.centers)
     geo.setAttribute('aSize', this.sizes)
     geo.setAttribute('aFade', this.fades)
+    geo.setAttribute('aLift', this.lifts)
 
     this.material = this._material()
     this.mesh = new THREE.InstancedMesh(geo, this.material, capacity)
@@ -132,6 +150,7 @@ export class Indicators {
            attribute vec3 aCenter;
            attribute float aSize;
            attribute float aFade;
+           attribute float aLift;
            varying float vFade;
            uniform vec2 uFrameScale;`
         )
@@ -149,7 +168,7 @@ export class Indicators {
            // size on screen while a world-space offset does not, so a centre that clears the
            // head when you are leaning in sits right on top of it when you pull out — the
            // gap shrinks with distance while the thing it has to clear does not.
-           mvPosition.y += scale * 0.5;
+           mvPosition.y += scale * ( 0.5 + aLift );
            mvPosition.xy += position.xy * scale;
            // Low-priority badges (asleep, idle) thin out quickly so a wide shot shows only
            // what actually wants you, while a close look still reports everything. Urgent
@@ -190,13 +209,31 @@ export class Indicators {
     return material
   }
 
-  /** Rebuild the instance buffers from the agents that currently want a badge. */
-  update(agents, elapsed, statusFor) {
+  /**
+   * Rebuild the instance buffers from the agents that currently want a badge. `roleFor` names
+   * an agent's part in a shared run (BADGE.orchestrator / BADGE.child), or BADGE.none.
+   */
+  update(agents, elapsed, statusFor, roleFor = () => BADGE.none) {
     const frames = this.frames.array
     const centers = this.centers.array
     const sizes = this.sizes.array
     const fades = this.fades.array
+    const lifts = this.lifts.array
     let n = 0
+    const pin = (badge, x, y, z, size, lift) => {
+      centers[n * 3] = x
+      centers[n * 3 + 1] = y
+      centers[n * 3 + 2] = z
+      frames[n * 2] = (badge % COLS) / COLS
+      frames[n * 2 + 1] = 1 - (Math.floor(badge / COLS) + 1) / ROWS
+      sizes[n] = size
+      fades[n] = FADE_BY_BADGE[badge] ?? 1
+      lifts[n] = lift
+      const c = BADGE_COLOR[badge] || [1, 1, 1]
+      this._color.setRGB(c[0], c[1], c[2])
+      this.mesh.setColorAt(n, this._color)
+      n++
+    }
 
     for (const agent of agents) {
       // Cleared for everyone first: an agent that loses its badge this frame must lose its
@@ -205,37 +242,32 @@ export class Indicators {
       if (n >= this.capacity) break
       if (agent.scale < 0.4 || agent.state === 'gone') continue
       const badge = statusFor(agent)
-      if (badge < 0) continue
+      const role = roleFor(agent)
+      if (badge < 0 && role < 0) continue
 
       // A gentle bob, and an urgent one for the states that want your attention.
       const urgent = badge === BADGE.waiting || badge === BADGE.blocked
       const bobRate = urgent ? 3.4 : 1.6
       const bobAmp = urgent ? 0.075 : 0.035
       const bob = Math.sin(elapsed * bobRate + agent.phase) * bobAmp
-
-      centers[n * 3] = agent.pos.x
       // Just clear of the helmet: the shader lifts the quad the rest of the way by its own
       // half-height, which is the part that has to change with the camera.
-      centers[n * 3 + 1] = agent.pos.y + HEAD_CLEAR * (agent.size ?? 1) + bob
-      centers[n * 3 + 2] = agent.pos.z
+      const y = agent.pos.y + HEAD_CLEAR * (agent.size ?? 1) + bob
 
-      frames[n * 2] = (badge % COLS) / COLS
-      frames[n * 2 + 1] = 1 - (Math.floor(badge / COLS) + 1) / ROWS
-
-      // Urgent badges breathe a little so they pull the eye across a busy colony.
-      sizes[n] = urgent ? 0.166 + Math.sin(elapsed * 4.2 + agent.phase) * 0.013 : 0.126
-      fades[n] = FADE_BY_BADGE[badge] ?? 1
-
-      // Handed to the picker so a click can hit the bubble itself rather than the head under
-      // it. It cannot be derived over there: the lift and the size are decided in view space
-      // by the vertex shader above, and only this loop knows which frame each agent got.
-      agent.badgeSize = sizes[n]
-      agent.badgeY = centers[n * 3 + 1]
-
-      const c = BADGE_COLOR[badge] || [1, 1, 1]
-      this._color.setRGB(c[0], c[1], c[2])
-      this.mesh.setColorAt(n, this._color)
-      n++
+      let size = 0
+      if (badge >= 0) {
+        // Urgent badges breathe a little so they pull the eye across a busy colony.
+        size = urgent ? 0.166 + Math.sin(elapsed * 4.2 + agent.phase) * 0.013 : 0.126
+        pin(badge, agent.pos.x, y, agent.pos.z, size, 0)
+        // Handed to the picker so a click can hit the bubble itself rather than the head under
+        // it. It cannot be derived over there: the lift and the size are decided in view space
+        // by the vertex shader above, and only this loop knows which frame each agent got.
+        agent.badgeSize = size
+        agent.badgeY = y
+      }
+      // The role pin rides on top of the status badge: both scale alike with distance, so a
+      // lift of the status badge's height in role-pin heights clears it at every zoom.
+      if (role >= 0 && n < this.capacity) pin(role, agent.pos.x, y, agent.pos.z, ROLE_SIZE, size ? size / ROLE_SIZE * 0.92 : 0)
     }
 
     this.mesh.count = n
@@ -243,6 +275,7 @@ export class Indicators {
     this.centers.needsUpdate = true
     this.sizes.needsUpdate = true
     this.fades.needsUpdate = true
+    this.lifts.needsUpdate = true
     this.mesh.instanceColor.needsUpdate = true
     this.mesh.instanceMatrix.needsUpdate = false
   }
@@ -261,7 +294,7 @@ export class Indicators {
  * — the glyph has to carry as a silhouette. Material's set is drawn filled to begin with,
  * one closed path per icon, so there is nothing to stroke and nothing to parse.
  */
-const ICON_PATHS = [mdiHelpCircle, mdiAlert, mdiHammer, mdiCheckBold, mdiPause, mdiSleep, mdiCreation, mdiLogout]
+const ICON_PATHS = [mdiHelpCircle, mdiAlert, mdiHammer, mdiCheckBold, mdiPause, mdiSleep, mdiCreation, mdiLogout, mdiSitemap, mdiSourceBranch]
 
 /**
  * The badge atlas. Red channel = the glyph, green channel = the plate's alpha — packing two

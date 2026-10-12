@@ -27,6 +27,7 @@ const IS_WIN = /Win/.test(navigator.platform)
 const FILE_MANAGER = IS_MAC ? 'Finder' : IS_WIN ? 'Explorer' : 'Files'
 
 export const ICON = {
+  plan: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2"/></svg>`,
   search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.7a8 8 0 0 1-8.5 8 9.3 9.3 0 0 1-2.7-.4L4.5 21l1.4-4.1a7.9 7.9 0 0 1-2.4-5.7A8 8 0 0 1 12 3.6a8 8 0 0 1 8.5 8.1z"/><path d="M8.5 11.7h.01M12 11.7h.01M15.5 11.7h.01"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
@@ -477,6 +478,7 @@ export class Hud {
     on('#btn-close-settings', 'click', () => this.toggleSettings(false))
     on('#btn-hide', 'click', () => this.toggleUi())
     on('#btn-help', 'click', () => this.toggleHelp())
+    on('#btn-plan', 'click', () => this.actions.openPlan?.())
     on('#btn-search', 'click', () => this.actions.openSearch?.())
     on('#btn-shot', 'click', () => this.actions.screenshot?.())
     on('#btn-home', 'click', () => this.actions.resetView?.())
@@ -496,6 +498,7 @@ export class Hud {
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
     on('#btn-hide-project', 'click', () => this.actions.hideProject?.())
     on('#btn-hidden-toggle', 'click', () => this.toggleHiddenList())
+    for (const tab of this.el.querySelectorAll('.side-tabs [data-tab]')) tab.addEventListener('click', () => this.showTab(tab.dataset.tab))
     on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.name))
     on('#btn-close-project', 'click', () => this.actions.closeProject?.())
     on('.help', 'click', (e) => {
@@ -563,7 +566,7 @@ export class Hud {
       b.addEventListener('click', () => this.actions.pickProject?.(p.name))
       wrap.appendChild(b)
     }
-    this.$('.sec-head span').textContent = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
+    this.$('.projects-pane .sec-head span').textContent = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
 
     // The hidden list is its own block at the foot of the sidebar: collapsed by default, because
     // the whole point of hiding a repo is not to look at it.
@@ -611,6 +614,60 @@ export class Hud {
     const total = hidden.length + folded.length
     this.$('#btn-hidden-toggle .label').textContent = `${total} off the map`
     this._syncHiddenList()
+  }
+
+  /**
+   * Which the sidebar shows: the repos (the list, or one repo drilled into), or the shared
+   * runs and their sessions. The tabs sit above both, so they are there wherever you are.
+   */
+  showTab(name) {
+    for (const t of this.el.querySelectorAll('.side-tabs [data-tab]')) t.setAttribute('aria-selected', String(t.dataset.tab === name))
+    this.$('.side').classList.toggle('tab-runs', name === 'runs')
+  }
+
+  /** Light the run row of the astronaut you picked, so the list says who the camera is on. */
+  setRunSelected(id) {
+    for (const b of this.el.querySelectorAll('.run-row')) b.setAttribute('aria-pressed', String(b.dataset.id === id))
+  }
+
+  /**
+   * The shared runs, one block per plan: its orchestrator, then each repo session it started.
+   * A row flies the camera to that session's astronaut and follows it. `runs` is `[{ plan, rows: [{ thread, role, name, status, step, urgent }] }]`.
+   */
+  setRuns(runs) {
+    const signature = JSON.stringify(runs.map((r) => [r.plan, r.rows.map((x) => [x.thread.id, x.name, x.status, x.step, x.urgent])]))
+    if (this._last.runs === signature) return
+    this._last.runs = signature
+    const urgent = runs.some((r) => r.rows.some((x) => x.urgent))
+    const count = this.$('.side-tabs .tab-count')
+    count.textContent = runs.length ? String(runs.length) : ''
+    count.classList.toggle('urgent', urgent)
+    const wrap = this.$('.run-list')
+    wrap.innerHTML = ''
+    if (!runs.length) {
+      wrap.innerHTML = '<p class="run-empty">No shared runs yet. Start one from the checklist button above.</p>'
+      return
+    }
+    for (const run of runs) {
+      const block = document.createElement('section')
+      block.className = 'run'
+      block.innerHTML = `<div class="sec-head"><span>${escapeHtml(run.plan)}</span></div>`
+      for (const x of run.rows) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = `repo run-row ${x.role}`
+        b.dataset.id = x.thread.id
+        b.title = `${x.role === 'orchestrator' ? 'Orchestrator' : 'Repo session'}: ${x.thread.title || x.name}. Flies to it and follows it.`
+        b.innerHTML =
+          `<i class="role-dot"></i>` +
+          `<span class="n">${escapeHtml(x.name)}</span>` +
+          (x.urgent ? '<i class="alarm"></i>' : '') +
+          `<span class="count">${escapeHtml(x.step ? `${x.status} · ${x.step}` : x.status)}</span>`
+        b.addEventListener('click', () => this.actions.trackThread?.(x.thread))
+        block.appendChild(b)
+      }
+      wrap.appendChild(block)
+    }
   }
 
   toggleHiddenList() {
@@ -1166,6 +1223,7 @@ const TEMPLATE = `
   <div class="grab"></div>
   <header class="brandbar">
     <div class="brand"><i class="dot"></i>Bot Crossing</div>
+    <button class="btn icon ghost" id="btn-plan" title="Run a plan as shared sessions">${ICON.plan}</button>
     <button class="btn icon ghost" id="btn-search" title="Search every thread, archived too (/)">${ICON.search}</button>
     <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
     <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
@@ -1176,6 +1234,15 @@ const TEMPLATE = `
   <div class="stats"></div>
 
   <div class="side-body">
+    <div class="side-tabs" role="tablist">
+      <button type="button" role="tab" data-tab="repos" aria-selected="true">Repos</button>
+      <button type="button" role="tab" data-tab="runs" aria-selected="false">Orchestrations <span class="tab-count"></span></button>
+    </div>
+
+    <div class="runs-pane">
+      <div class="run-list"></div>
+    </div>
+
     <div class="projects-pane">
       <div class="sec-head"><span>Repos</span></div>
       <div class="projects"></div>

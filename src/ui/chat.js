@@ -9,7 +9,7 @@
  * and opening its thread again picks it up with everything it said in the meantime. Only Stop
  * ends one early. Which chat was open is remembered for the tab, so a reload brings it back.
  */
-import { chatAttach, chatCommands, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop } from '../game/api.js'
+import { chatAttach, chatCommands, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
 import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { LinkPanel } from './link-panel.js'
@@ -18,6 +18,7 @@ const TEMPLATE = `
 <div class="sheet panel">
   <div class="chat-head">
     <div class="info"><div class="repo-tag" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
+    <button class="btn ghost" data-report title="You talked to this repo session yourself: pass that conversation on to its orchestrator" hidden>Report to orchestrator</button>
     <button class="btn ghost" data-next title="Next thread that needs you (⌥N)" hidden></button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>
@@ -222,6 +223,7 @@ export class Chat {
     this.el.addEventListener('pointerdown', (e) => (downOnBackdrop = e.target === this.el))
     this.el.addEventListener('click', (e) => downOnBackdrop && e.target === this.el && this.close())
     this.$('[data-close]').addEventListener('click', () => this.close())
+    this.$('[data-report]').addEventListener('click', () => this.reportToOrchestrator())
     this.$('[data-stop]').addEventListener('click', () => this.runId && chatStop(this.runId).catch(() => {}))
     this.$('form').addEventListener('submit', (e) => {
       e.preventDefault()
@@ -475,6 +477,8 @@ export class Chat {
     this.showModel(thread?.model)
     this.$('.sub').hidden = false
     this.$('.repo-pick').hidden = true
+    // Only a repo session of a shared run has an orchestrator to tell.
+    this.$('[data-report]').hidden = thread?.share?.role !== 'child'
     this.input.placeholder = placeholder
     this.log.replaceChildren()
     this.showSchedule([])
@@ -486,6 +490,15 @@ export class Chat {
     const size = this.sizes[this.sizeKey]
     this.sheet.style.width = size?.width || ''
     this.sheet.style.height = size?.height || ''
+  }
+
+  /**
+   * A reply started somewhere else, watched here from its first event: the orchestrator of a
+   * plan. Once its session names itself it is a thread like any other.
+   */
+  openRun({ runId, folder, title, sub = 'Orchestrator · Claude Code' }) {
+    this.reset({ folder, title, sub, placeholder: MESSAGE_PLACEHOLDER })
+    this.watch(runId, this.add('assistant'), null, title)
   }
 
   /**
@@ -579,6 +592,22 @@ export class Chat {
     }
     this.sync()
     this.input.focus()
+  }
+
+  /** Send what you and this repo session said since its last report to its orchestrator. */
+  async reportToOrchestrator() {
+    const button = this.$('[data-report]')
+    if (!this.thread || button.disabled) return
+    button.disabled = true
+    this.note('Telling the orchestrator…')
+    try {
+      const r = await shareReport(this.thread.ref)
+      this.note(r.sent ? `Sent ${r.messages} message${r.messages === 1 ? '' : 's'} to the orchestrator. Its reply is in its own chat (Orchestrations tab).` : r.reason)
+    } catch (err) {
+      this.note(err.message, true)
+    } finally {
+      button.disabled = false
+    }
   }
 
   note(text, isError = false) {

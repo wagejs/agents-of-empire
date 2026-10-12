@@ -1145,7 +1145,7 @@ export class Colony {
     this._growBuildings(dt)
     this.astronauts.update(dt, elapsed)
     this.astronauts.updateRings(elapsed)
-    this.indicators.update(this.astronauts.agents, elapsed, (a) => this._badgeFor(a))
+    this.indicators.update(this.astronauts.agents, elapsed, (a) => this._badgeFor(a), (a) => this._roleFor(a))
     this._emit(dt, elapsed)
     this._emitMotes(dt, night)
     this.particles.ambient(dt, this.camera, this.planet, night, (x, z) => this.surfaceAt(x, z))
@@ -1198,6 +1198,12 @@ export class Colony {
     // shoved off its mark by a neighbour, re-routed round a new building — is still the one
     // waiting on you, and the symbol that says so must not blink out for the trip.
     return BADGE_FOR[agent.status] ?? BADGE.none
+  }
+
+  /** The pin for an astronaut's part in a shared run: orchestrator, repo session, or none. */
+  _roleFor(agent) {
+    const role = this.threads.get(agent.id)?.share?.role
+    return role === 'orchestrator' ? BADGE.orchestrator : role === 'child' ? BADGE.child : BADGE.none
   }
 
   /** Particle emission, driven by what each astronaut is doing. */

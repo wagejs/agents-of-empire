@@ -284,40 +284,41 @@ export function openStore(root = defaultStoreRoot(), { reposDir = defaultReposDi
     repoPath: (name) => (path.isAbsolute(name) ? name : path.join(reposDir, name)),
 
     /**
-     * Orchestrator only. Bring each repo's graph up to the repo's HEAD and record it. A graph
-     * already built at HEAD is left alone: `graphify update` on web-app takes minutes.
-     * `run` is the command runner, swapped out by tests.
+     * Orchestrator only. Give each session worktree its own graph at the worktree's base commit,
+     * and record it. The graph is seeded from the main repo's graphify-out/ (gitignored, paths
+     * relative), so `graphify update` in the worktree re-extracts only what changed; the main
+     * repo's graph is never touched. `repos` are addWorktrees' entries; `run` is swapped by tests.
      */
-    async refreshGraphs(repoNames, { run = exec } = {}) {
+    async refreshGraphs(repos, { run = exec } = {}) {
       const entries = {}
-      for (const repo of repoNames) {
-        const repo_path = store.repoPath(repo)
-        const name = path.basename(repo_path)
-        const graph_path = path.join(repo_path, 'graphify-out', 'graph.json')
-        const head = await gitHead(repo_path)
+      for (const r of repos) {
+        const seed = path.join(r.repo_path, 'graphify-out')
+        const graph_path = path.join(r.worktree, 'graphify-out', 'graph.json')
+        if (!fs.existsSync(graph_path) && fs.existsSync(path.join(seed, 'graph.json'))) await fsp.cp(seed, path.dirname(graph_path), { recursive: true })
         // No graph yet: building one is a full extract (an LLM pass), not this function's call.
         if (!fs.existsSync(graph_path)) {
-          entries[name] = { name, repo_path, graph_path: null, built_at: null, git_sha: head }
+          entries[r.name] = { ...r, graph_path: null, built_at: null }
           continue
         }
         let built = await builtAt(graph_path)
-        if (built.sha !== head) {
-          await run(graphifyBin(), ['update', '.'], { cwd: repo_path, timeout: 15 * 60_000, maxBuffer: 64 << 20 })
-          await store.appendLog({ type: 'graph_update', repo: name, from: built.sha, to: head })
+        if (built.sha !== r.git_sha) {
+          await run(graphifyBin(), ['update', '.'], { cwd: r.worktree, timeout: 15 * 60_000, maxBuffer: 64 << 20 })
+          await store.appendLog({ type: 'graph_update', repo: r.name, from: built.sha, to: r.git_sha })
           built = await builtAt(graph_path)
         }
-        entries[name] = { name, repo_path, graph_path, built_at: built.at, git_sha: built.sha || head }
+        entries[r.name] = { ...r, graph_path, built_at: built.at }
       }
       await withLock(p.graphs, async () => {
         const reg = await readJson(p.graphs, { repos: {} })
-        Object.assign((reg.repos ||= {}), entries)
+        for (const e of Object.values(entries)) (reg.repos ||= {})[e.name] = { name: e.name, repo_path: e.repo_path, graph_path: e.graph_path, built_at: e.built_at, git_sha: e.git_sha }
         await writeAtomic(p.graphs, JSON.stringify(reg, null, 2) + '\n')
       })
       return entries
     },
 
     /**
-     * Which of a note's code_refs point at a commit the repo has moved past. Marks the note's
+     * Which of a note's code_refs point at a commit the remote base has moved past (as of the
+     * last fetch; the local checkout does not count). Marks the note's
      * index line `stale_code_ref` when any do; the note itself is never touched.
      */
     async checkFreshness(noteOrId) {
@@ -351,7 +352,7 @@ export function openStore(root = defaultStoreRoot(), { reposDir = defaultReposDi
     const stale = []
     for (const ref of note.code_refs || []) {
       const repo_path = reg.repos?.[ref.repo]?.repo_path || store.repoPath(ref.repo)
-      if (!heads.has(repo_path)) heads.set(repo_path, await gitHead(repo_path).catch(() => ''))
+      if (!heads.has(repo_path)) heads.set(repo_path, await gitHead(repo_path, 'origin/HEAD').catch(() => gitHead(repo_path, 'origin/main')).catch(() => ''))
       const head = heads.get(repo_path)
       if (!head || !(head.startsWith(ref.sha) || ref.sha.startsWith(head))) stale.push({ ...ref, head })
     }
@@ -367,8 +368,8 @@ export function openStore(root = defaultStoreRoot(), { reposDir = defaultReposDi
   return store
 }
 
-export async function gitHead(repo) {
-  const { stdout } = await exec('git', ['-C', repo, 'rev-parse', 'HEAD'])
+export async function gitHead(repo, rev = 'HEAD') {
+  const { stdout } = await exec('git', ['-C', repo, 'rev-parse', rev])
   return stdout.trim()
 }
 

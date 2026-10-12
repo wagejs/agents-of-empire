@@ -26,6 +26,16 @@ import { cliBinary, newChatThread, toolSummary } from './harnesses/claude-code.m
 const shared = (globalThis[Symbol.for('bot-crossing.chat')] ??= { runs: new Map(), pending: new Map() })
 const { runs, pending } = shared
 
+/**
+ * Extra SDK options some sessions always run with, whoever sends to them: the orchestrator's
+ * tools, say. Each provider answers for a session id, or with nothing; keyed by name so the dev
+ * server re-importing a provider replaces it rather than adding a second.
+ */
+const extras = (shared.extras ??= new Map())
+export const provideSessionOptions = (name, forSession) => extras.set(name, forSession)
+const extraOptions = (target) =>
+  Object.assign({}, ...[...extras.values()].map((forSession) => (target.sessionId && forSession(target.sessionId)) || {}), target.options)
+
 /** How long a finished run stays attachable, so a page that reloads just then still sees how it ended. */
 const KEEP_FINISHED_MS = 60_000
 
@@ -228,7 +238,7 @@ export const modeOf = (mode) => (MODES.includes(mode) ? mode : 'default')
  * The models a chat can pick, as Claude Code's own `--model` aliases, so each always means the
  * latest of its line. Anything else, '' included, leaves the thread on its default.
  */
-export const MODELS = ['opus', 'sonnet', 'haiku']
+export const MODELS = ['opus', 'sonnet', 'haiku', 'claude-opus-5-5']
 export const modelOf = (model) => (MODELS.includes(model) ? model : '')
 
 /** Commands per folder, and when they were read: a list this size barely changes. */
@@ -457,6 +467,8 @@ async function drive(run, target, text, query) {
     const messages = (run.session = query({
       prompt: input,
       options: {
+        // First, so nothing a provider says can change how the page asks, streams or stops.
+        ...extraOptions(target),
         resume: target.sessionId || undefined,
         cwd: target.cwd,
         // Explicit: left unset, a resumed run can start in `auto` and never ask the page at all.

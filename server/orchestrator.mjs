@@ -3,8 +3,9 @@
  * what you approve into shared notes.
  *
  * Only the orchestrator writes notes/ and index.md, and only it runs `graphify update`. Each
- * session gets a git worktree per repo at the commit its graph was built at, so the code it
- * reads is exactly the code the graph describes, and the `sha` in its code_refs says which.
+ * session gets a git worktree per repo, branched fresh from the remote base branch, with its own
+ * copy of the graph brought up to that commit, so the code it reads is exactly the code the
+ * graph describes, and the `sha` in its code_refs says which.
  *
  * `query` is the SDK's unless a test hands in its own, the same seam `chat.mjs` uses.
  */
@@ -23,9 +24,9 @@ const git = (cwd, ...args) => exec('git', ['-C', cwd, ...args]).then((r) => r.st
 
 /** The stable rules every session runs under. Task facts go in the brief, not here. */
 export const SESSION_RULES = `
-You are a delegated session working for an orchestrator. Your brief is brief.md in your working folder.
+You are a delegated session working for an orchestrator. Your brief is brief.md in your session folder (named at the end of these rules).
 - Do the one task in the brief. You may use your own skills and subagents; a subagent returns its result to you, never to the store.
-- Write only in your working folder and in the repo worktrees listed in the brief. Keep your own working notes in thread.md there.
+- Write only in your session folder and in the repo worktrees listed in the brief. Keep your own working notes in thread.md in your session folder.
 - Shared notes are read-only to you: read index.md and use mcp__store__read_note. Never write to the store directly.
 - Code graphs are read-only: use the graphify-<repo> MCP tools, or graphify query/path/explain. Never run graphify update/extract or touch graphify-out/.
 - Every code fact carries code_refs {repo, node, file, line, sha, confidence}. Use the brief's git_sha for sha. Copy the edge's confidence (EXTRACTED, INFERRED, AMBIGUOUS).
@@ -37,13 +38,29 @@ You are a delegated session working for an orchestrator. Your brief is brief.md 
 const worktreePath = (repoPath, name) => path.join(repoPath, '.claude', 'worktrees', `share-${name}`)
 const branchOf = (name) => `share/${name}`
 
-/** A worktree per repo at the graph's commit, reused when the session already has one. */
-async function addWorktrees(entries, name) {
+/**
+ * The commit a repo's sessions start from: its remote default branch, fetched now. The main
+ * checkout's branch, HEAD and uncommitted changes never matter, however stale they are.
+ */
+async function remoteBase(repoPath) {
+  await git(repoPath, 'fetch', '--quiet', 'origin')
+  const ref = await git(repoPath, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD').catch(() => 'origin/main')
+  return { ref, sha: await git(repoPath, 'rev-parse', ref) }
+}
+
+/**
+ * A worktree per repo, branched fresh from the remote base, reused when the session already has
+ * one. `git_sha` is where the branch left the base, so the session's own commits never count.
+ */
+async function addWorktrees(store, repos, name) {
   const out = []
-  for (const e of Object.values(entries)) {
-    const worktree = worktreePath(e.repo_path, name)
-    if (!fs.existsSync(worktree)) await git(e.repo_path, 'worktree', 'add', '-b', branchOf(name), worktree, e.git_sha)
-    out.push({ ...e, worktree, branch: branchOf(name) })
+  for (const repo of repos) {
+    const repo_path = store.repoPath(repo)
+    const worktree = worktreePath(repo_path, name)
+    const base = await remoteBase(repo_path)
+    if (!fs.existsSync(worktree)) await git(repo_path, 'worktree', 'add', '--no-track', '-b', branchOf(name), worktree, base.sha)
+    const git_sha = await git(worktree, 'merge-base', 'HEAD', base.sha)
+    out.push({ name: path.basename(repo_path), repo_path, worktree, branch: branchOf(name), base: base.ref, git_sha })
   }
   return out
 }
@@ -86,9 +103,9 @@ ${list(noteIds)}
 ${reportFormat || 'Call mcp__store__submit_report with status, summary, decisions, facts, open_questions, artifacts, needs_from_orchestrator.'}
 
 ## Repos
-| repo | worktree | graph_path | git_sha | built_at |
-|---|---|---|---|---|
-${repos.map((r) => `| ${r.name} | ${r.worktree} | ${r.graph_path || '(no graph)'} | ${r.git_sha} | ${r.built_at || '-'} |`).join('\n') || '| (none) | | | | |'}
+| repo | worktree | base | graph_path | git_sha | built_at |
+|---|---|---|---|---|---|
+${repos.map((r) => `| ${r.name} | ${r.worktree} | ${r.base || '-'} | ${r.graph_path || '(no graph)'} | ${r.git_sha} | ${r.built_at || '-'} |`).join('\n') || '| (none) | | | | | |'}
 
 Graph MCP servers: ${repos.filter((r) => r.graph_path && r.graph_mcp !== false).map((r) => `graphify-${r.name}`).join(', ') || '(none)'}
 ${repos
@@ -103,23 +120,32 @@ ${JSON.stringify(freshness, null, 2)}
 `
 }
 
-/** The SDK options for one session, rebuilt the same way on start and on resume. */
+/** The model every session runs on unless told otherwise. */
+export const DEFAULT_MODEL = 'claude-opus-5-5'
+
+/**
+ * The SDK options for one session, rebuilt the same way on start and on resume. A session with
+ * repos opens in its first worktree, so it is a thread of that repo, as if started there; its
+ * store folder and any other worktrees come along as extra directories.
+ */
 async function sessionOptions(store, name, repos, mode, extra = {}) {
   const dir = store.sessionDir(name)
-  const writable = [dir, ...repos.map((r) => r.worktree)]
+  const worktrees = repos.map((r) => r.worktree)
+  const writable = [dir, ...worktrees]
   const ctx = { readFiles: new Set() }
   return {
-    cwd: dir,
-    additionalDirectories: repos.map((r) => r.worktree),
+    cwd: worktrees[0] || dir,
+    additionalDirectories: worktrees.length ? [dir, ...worktrees.slice(1)] : [],
     mcpServers: { store: storeServer(store, name, ctx), ...graphServers(repos) },
     hooks: sessionHooks(store, name, writable, ctx),
     canUseTool: sessionPermissions(store, name, writable, { bash: mode === 'implement' ? IMPLEMENT_BASH : null }),
     permissionMode: 'default',
     // Your own skills and settings load, as in a terminal; the hooks above still apply.
     settingSources: ['user', 'project', 'local'],
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: SESSION_RULES },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: `${SESSION_RULES}\nYour session folder (brief.md, thread.md) is ${dir}.` },
     pathToClaudeCodeExecutable: (await cliBinary()) || undefined,
     ...extra,
+    model: extra.model || DEFAULT_MODEL,
   }
 }
 
@@ -154,14 +180,14 @@ export async function startSession(
 ) {
   assertSessionName(name)
   await store.init()
-  const entries = await store.refreshGraphs(repos, run ? { run } : {})
-  const withWorktrees = (await addWorktrees(entries, name)).map((r) => ({ ...r, graph_mcp: Boolean(r.graph_path) && serveCheck(r.graph_path) }))
+  const entries = await store.refreshGraphs(await addWorktrees(store, repos, name), run ? { run } : {})
+  const withWorktrees = Object.values(entries).map((r) => ({ ...r, graph_mcp: Boolean(r.graph_path) && serveCheck(r.graph_path) }))
   for (const r of withWorktrees) {
     if (r.graph_path && !r.graph_mcp) await store.appendLog({ type: 'graph_mcp_unavailable', session: name, repo: r.name })
   }
   const brief = renderBrief({ name, goal, limits, noteIds, reportFormat, repos: withWorktrees })
   const dir = await store.createSession(name, brief)
-  await store.writeState(name, { status: 'running', mode, repos: withWorktrees, note_ids: noteIds, started_at: new Date().toISOString() })
+  await store.writeState(name, { status: 'running', mode, model: model || DEFAULT_MODEL, repos: withWorktrees, note_ids: noteIds, started_at: new Date().toISOString() })
   await store.appendLog({ type: 'session_start', session: name, repos: withWorktrees.map((r) => `${r.name}@${r.git_sha.slice(0, 8)}`) })
   const prompt = `Your brief (also at ${path.join(dir, 'brief.md')}):\n\n${brief}`
   return drive(store, name, prompt, await sessionOptions(store, name, withWorktrees, mode, { model, ...options }), query)
@@ -174,7 +200,7 @@ export async function resumeSession(name, message, { store = openStore(), query 
   if (state.status === 'closed') throw new Error(`Session ${name} is closed`)
   await store.writeState(name, { status: 'running', stop_bounces: 0 })
   await store.appendLog({ type: 'session_resume', session: name })
-  const opts = await sessionOptions(store, name, state.repos || [], state.mode, { resume: state.session_id, model, ...options })
+  const opts = await sessionOptions(store, name, state.repos || [], state.mode, { resume: state.session_id, model: model || state.model, ...options })
   return drive(store, name, message, opts, query)
 }
 

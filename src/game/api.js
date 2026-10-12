@@ -159,6 +159,12 @@ export const chatAttach = (runId, from, onEvent, signal) =>
 
 export const chatStop = (runId) => post('/api/chat/stop', { runId })
 
+/** Shared sessions: what a plan.md would start, and starting its orchestrator. */
+export const sharePreview = (plan) => post('/api/share/preview', { plan })
+export const shareStart = (plan, models) => post('/api/share/start', { plan, models })
+/** What you said to a repo session yourself, passed on to its orchestrator. */
+export const shareReport = (ref) => post('/api/share/report', { ref })
+
 /** The reply is NDJSON, one event per line, so a tool approval can arrive mid-stream. */
 async function streamEvents(url, payload, onEvent, signal) {
   const res = await fetch(url, {

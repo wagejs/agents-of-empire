@@ -31,12 +31,18 @@ async function makeRepo() {
   await fsp.writeFile(path.join(repo, 'country.go'), 'package demo\n\nfunc GetCountry() string { return "id" }\n')
   git('add', '.')
   git('commit', '-q', '-m', 'init')
+  // A bare origin: sessions branch from origin/HEAD, never the local checkout.
+  const origin = path.join(tmp, 'origins', 'demo.git')
+  execFileSync('git', ['clone', '-q', '--bare', repo, origin])
+  git('remote', 'add', 'origin', origin)
+  git('fetch', '-q', 'origin')
+  git('remote', 'set-head', 'origin', 'main')
   await writeGraph(git('rev-parse', 'HEAD'))
 }
 
-const writeGraph = (sha) =>
+const writeGraph = (sha, dir = repo) =>
   fsp.writeFile(
-    path.join(repo, 'graphify-out', 'graph.json'),
+    path.join(dir, 'graphify-out', 'graph.json'),
     JSON.stringify({
       directed: true,
       graph: { schema_version: 1, graphify_version: '0.9.83' },
@@ -60,9 +66,9 @@ const noGraphify = async () => {
  * `onSentBack` each time Stop sends it back, as Claude Code would continue the turn.
  */
 function fakeQuery(store, { work = async () => {}, onSentBack = async () => {} } = {}) {
-  return ({ options }) =>
+  return ({ prompt, options }) =>
     (async function* () {
-      const name = path.basename(options.cwd)
+      const name = /# Brief: (\S+)/.exec(prompt)[1]
       yield { type: 'system', subtype: 'init', session_id: `sid-${name}`, model: 'fake' }
       const call = (event, input) => options.hooks[event][0].hooks[0]({ hook_event_name: event, cwd: options.cwd, ...input })
       const s = {
@@ -272,6 +278,9 @@ test('7. a new commit marks a note stale_code_ref in the index, and leaves the n
 
   await fsp.appendFile(path.join(repo, 'country.go'), '\n// moved on\n')
   git('commit', '-qam', 'move on')
+  // Only the remote counts: a local commit alone does not make a note stale.
+  assert.equal((await store.checkFreshness(note.id)).stale, false)
+  git('push', '-q', 'origin', 'main')
   try {
     const result = await store.checkFreshness(note.id)
     assert.equal(result.stale, true)
@@ -289,13 +298,14 @@ test('7. a new commit marks a note stale_code_ref in the index, and leaves the n
 
 test('8. brief.md carries graph paths and freshness; a stale graph is updated first', async () => {
   const store = await freshStore()
-  const graphPath = path.join(repo, 'graphify-out', 'graph.json')
-  // Graph one commit behind: refreshGraphs has to run `graphify update .` in the repo.
+  const wt = path.join(repo, '.claude', 'worktrees', 'share-briefed')
+  const graphPath = path.join(wt, 'graphify-out', 'graph.json')
+  // Main graph one commit behind: the worktree's copy has to be updated there, not in the repo.
   await writeGraph('0000000000000000000000000000000000000000')
   const ran = []
   const run = async (bin, args, opts) => {
     ran.push({ args, cwd: opts.cwd })
-    await writeGraph(head())
+    await writeGraph(head(), opts.cwd)
   }
   let servers
   await startSession('briefed', { goal: 'Find who calls GetCountry', limits: ['read only'], repos: ['demo'], reportFormat: 'facts with code_refs' }, {
@@ -311,7 +321,9 @@ test('8. brief.md carries graph paths and freshness; a stale graph is updated fi
   })
   assert.deepEqual(servers['graphify-demo'].args, ['-m', 'graphify.serve', graphPath])
   assert.equal(servers.store.type, 'sdk')
-  assert.deepEqual(ran, [{ args: ['update', '.'], cwd: repo }])
+  assert.deepEqual(ran, [{ args: ['update', '.'], cwd: wt }])
+  assert.equal(JSON.parse(await fsp.readFile(path.join(repo, 'graphify-out', 'graph.json'), 'utf8')).built_at_commit, '0'.repeat(40), "the main repo's graph is left alone")
+  await writeGraph(head())
   const brief = await fsp.readFile(path.join(store.sessionDir('briefed'), 'brief.md'), 'utf8')
   const built = (await fsp.stat(graphPath)).mtime.toISOString()
   for (const s of ['Find who calls GetCountry', 'read only', 'facts with code_refs', graphPath, head(), built, 'graphify-demo', 'share-briefed']) {
@@ -338,6 +350,35 @@ test('8. brief.md carries graph paths and freshness; a stale graph is updated fi
   })
   assert.deepEqual(Object.keys(servers), ['store'])
   assert.match(await fsp.readFile(path.join(store.sessionDir('no-mcp'), 'brief.md'), 'utf8'), /MCP server is unavailable.*use this/)
+})
+
+test('a session branches from the fetched remote base, whatever the local checkout holds', async () => {
+  const store = await freshStore()
+  // origin moves ahead (as if someone merged), while the local checkout is behind and dirty.
+  await fsp.appendFile(path.join(repo, 'country.go'), '\n// merged upstream\n')
+  git('commit', '-qam', 'upstream')
+  git('push', '-q', 'origin', 'main')
+  const upstream = head()
+  git('reset', '-q', '--hard', 'HEAD~1')
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD') // the local repo has not fetched it yet
+  await fsp.writeFile(path.join(repo, 'local-only.txt'), 'uncommitted')
+  try {
+    await startSession('fresh', { goal: 'g', repos: ['demo'] }, {
+      store,
+      run: (bin, args, opts) => writeGraph(upstream, opts.cwd),
+      serveCheck: () => true,
+      query: fakeQuery(store, { work: (s) => s.tools.submit_report(report(upstream)) }),
+    })
+    const [r] = (await store.readState('fresh')).repos
+    assert.equal(execFileSync('git', ['-C', r.worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), upstream)
+    assert.equal(r.git_sha, upstream)
+    assert.equal(r.base, 'origin/main')
+    assert.ok(!fs.existsSync(path.join(r.worktree, 'local-only.txt')), 'uncommitted local files stay out')
+  } finally {
+    await fsp.rm(path.join(repo, 'local-only.txt'))
+    git('reset', '-q', '--hard', 'origin/main')
+    await writeGraph(head())
+  }
 })
 
 test('a fact resting only on INFERRED edges is strong only once its file was read', async () => {

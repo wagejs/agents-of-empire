@@ -24,6 +24,11 @@ async function makeRepo(name) {
   await fsp.writeFile(path.join(repo, 'main.txt'), name)
   git('add', '.')
   git('commit', '-q', '-m', 'init')
+  const origin = path.join(tmp, 'origins', `${name}.git`)
+  execFileSync('git', ['clone', '-q', '--bare', repo, origin])
+  git('remote', 'add', 'origin', origin)
+  git('fetch', '-q', 'origin')
+  git('remote', 'set-head', 'origin', 'main')
   await fsp.writeFile(path.join(repo, 'graphify-out', 'graph.json'), JSON.stringify({ nodes: [], links: [], built_at_commit: git('rev-parse', 'HEAD') }))
 }
 await makeRepo('be-api')
@@ -69,18 +74,48 @@ test('a plan splits into one session per repo, with cross-repo parents', () => {
 })
 
 test('a plan with no steps section, or a dependency cycle, is refused', () => {
-  assert.throws(() => parsePlan('# x\n## Context\n', { isRepo }), /no "## Implementation steps"/)
+  assert.throws(() => parsePlan('# x\n## Context\n', { isRepo }), /no "## Files to Change" or "## Implementation steps"/)
   const design = parsePlan('## Design\n### 1. `be-api`: a\n## Risks\n', { isRepo })
   assert.equal(design.repos[0].repo, 'be-api')
   const cycle = '## Implementation steps\n### 1. `be-api` (after step 2)\n### 2. `fe-web` (depends on step 1)\n'
   assert.throws(() => parsePlan(cycle, { isRepo }), /cycle/)
 })
 
+test('"Files to Change" decides the repos when step headings name none', () => {
+  const plan = `# LGST-1
+## Design
+### 1. Override the country in the handler
+x
+### 2. FE sends the param (after step 1)
+y
+## Files to Change
+| Repo | Change |
+| --- | --- |
+| \`be-api\` | New \`pkg/utils/country.go\` and its test |
+| \`be-api\` | Handlers call the helper |
+| \`fe-web\` | \`api/catalogue.js\` sends country_code |
+| \`not-a-repo\` | ignored |
+
+Nothing else changes.
+## Tests
+- \`fe-web\`: not a file to change
+`
+  const { repos, unassigned } = parsePlan(plan, { isRepo })
+  assert.deepEqual(repos.map((r) => [r.repo, r.steps.map((s) => s.title)]), [
+    ['be-api', ['New `pkg/utils/country.go` and its test', 'Handlers call the helper']],
+    ['fe-web', ['`api/catalogue.js` sends country_code']],
+  ])
+  assert.deepEqual(unassigned, [], 'design steps are context once files say where the work is')
+  // Bullets under a repo heading read the same; with no design section at all.
+  const bullets = parsePlan('## Files to Change\n### `fe-web`\n- `a.js`: send it\n- be-api handler: `be-api` reads it\n', { isRepo })
+  assert.deepEqual(bullets.repos.map((r) => [r.repo, r.steps.length]), [['fe-web', 1], ['be-api', 1]])
+})
+
 /** A fake session: reports `status` after `delay` ms, recording when it started. */
 function fakeQuery(store, events, { fail = [] } = {}) {
   return ({ prompt, options }) =>
     (async function* () {
-      const name = path.basename(options.cwd)
+      const name = /# Brief: (\S+)/.exec(prompt)[1]
       events.push({ name, at: 'start', prompt })
       yield { type: 'system', subtype: 'init', session_id: `sid-${name}` }
       await new Promise((r) => setTimeout(r, 60))

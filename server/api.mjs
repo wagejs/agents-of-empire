@@ -7,6 +7,7 @@ import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { previewLink } from './link.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
+import { shareRoles, shareRoute } from './conductor.mjs'
 import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, modelOf, setRunModel, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
 import {
   chatTarget,
@@ -536,9 +537,12 @@ export async function apiMiddleware(req, res, next) {
   try {
     if (url.pathname === '/api/threads' && req.method === 'GET') {
       // A thread whose reply is running from the page says so, and whether it waits on you.
+      // And one in a shared run says which part it plays: orchestrator, or a repo session of it.
+      const roles = shareRoles()
       const threads = (await reconcileArchived(await scanThreads())).map((t) => {
         const chat = chatStatus(t.id)
-        return chat ? { ...t, chat } : t
+        const share = roles.get(t.ref?.cliSessionId)
+        return { ...t, ...(chat && { chat }), ...(share && { share }) }
       })
       // A harness that is present but cannot read its own store says so here, rather than
       // appearing healthy in the list while quietly contributing nothing.
@@ -602,6 +606,17 @@ export async function apiMiddleware(req, res, next) {
     }
 
     if (url.pathname.startsWith('/api/chat/')) return await chat(url.pathname, req, res)
+
+    // Shared sessions start Claude Code sessions that edit code, so, like chat, this machine only.
+    if (url.pathname.startsWith('/api/share/') && req.method === 'POST') {
+      if (!LOOPBACK.has(req.socket.remoteAddress)) return send(res, 403, { error: 'Shared sessions only answer a browser on this machine' })
+      try {
+        const { status, json } = await shareRoute(url.pathname, await readJsonBody(req))
+        return send(res, status, json)
+      } catch (err) {
+        return send(res, 400, { error: String(err?.message || err) })
+      }
+    }
 
     return send(res, 404, { error: 'Unknown endpoint' })
   } catch (err) {

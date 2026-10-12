@@ -14,7 +14,7 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { collectReport, startSession } from './orchestrator.mjs'
+import { collectReport, DEFAULT_MODEL, startSession } from './orchestrator.mjs'
 import { openStore } from './store.mjs'
 
 const STEP_SECTIONS = [/^##\s+implementation steps\b/i, /^##\s+implementation\b/i, /^##\s+design\b/i]
@@ -30,23 +30,57 @@ export const repoChecker = (reposDir) => (name) => fs.existsSync(path.join(repos
 
 const ticks = (text) => [...text.matchAll(/`([\w.-]+)`/g)].map((m) => m[1])
 
+/** The lines of the first `## ` section whose heading matches one of `res`, or null. */
+function sectionOf(lines, res) {
+  for (const re of res) {
+    const start = lines.findIndex((l) => re.test(l))
+    if (start < 0) continue
+    const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l))
+    return lines.slice(start + 1, end < 0 ? undefined : end)
+  }
+  return null
+}
+
 /**
- * The plan's steps grouped by repo, with each repo's parents. Throws when the plan has no
- * steps section or its dependencies form a cycle.
+ * The "## Files to Change" section: one entry per change, with its repo. Reads a table whose
+ * first column is the repo, or bullets under a `### repo` heading or naming the repo in backticks.
+ */
+function filesToChange(lines, isRepo) {
+  const out = []
+  let current = ''
+  for (const line of sectionOf(lines, [/^##\s+Files to change\b/i]) || []) {
+    if (/^###\s/.test(line)) {
+      current = ticks(line).find(isRepo) || line.replace(/^###\s+/, '').trim()
+      if (!isRepo(current)) current = ''
+      continue
+    }
+    const cells = line.trim().startsWith('|') ? line.split('|').slice(1, -1).map((c) => c.trim()) : null
+    if (cells) {
+      const repo = ticks(cells[0])[0] || cells[0]
+      if (cells.length > 1 && isRepo(repo)) out.push({ repo, change: cells.slice(1).join(' · ') })
+      continue
+    }
+    const item = /^\s*(?:[-*]|\d+\.)\s+(.*)/.exec(line)?.[1]
+    const repo = item && (ticks(item).find(isRepo) || current)
+    if (repo) out.push({ repo, change: item })
+  }
+  return out
+}
+
+/**
+ * The plan's steps grouped by repo, with each repo's parents. When the plan has a "Files to
+ * Change" section, its repos are the ones that get sessions and its rows are their scope; steps
+ * that name a repo add to it, and "after step N" still orders them. Throws when the plan has
+ * neither, or its dependencies form a cycle.
  */
 export function parsePlan(text, { isRepo }) {
   const lines = text.split('\n')
-  let start = -1
-  for (const re of STEP_SECTIONS) {
-    start = lines.findIndex((l) => re.test(l))
-    if (start >= 0) break
-  }
-  if (start < 0) throw new Error('The plan has no "## Implementation steps" (or "## Design") section')
-  const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l))
-  const section = lines.slice(start + 1, end < 0 ? undefined : end)
+  const files = filesToChange(lines, isRepo)
+  const section = sectionOf(lines, STEP_SECTIONS)
+  if (!section && !files.length) throw new Error('The plan has no "## Files to Change" or "## Implementation steps" (or "## Design") section')
 
   const steps = []
-  for (const line of section) {
+  for (const line of section || []) {
     if (/^###\s/.test(line)) steps.push({ title: line.replace(/^###\s+/, '').trim(), lines: [] })
     else steps.at(-1)?.lines.push(line)
   }
@@ -72,6 +106,11 @@ export function parsePlan(text, { isRepo }) {
     }
     repos.set(s.repo, r)
   }
+  for (const f of files) {
+    const r = repos.get(f.repo) || { repo: f.repo, steps: [], dependsOn: new Set() }
+    r.steps.push({ title: f.change, body: '', file: true })
+    repos.set(f.repo, r)
+  }
   const out = [...repos.values()].map((r) => ({ ...r, dependsOn: [...r.dependsOn] }))
   // A cycle would leave sessions waiting on each other forever.
   const seen = new Set()
@@ -82,7 +121,9 @@ export function parsePlan(text, { isRepo }) {
     seen.add(name)
   }
   for (const r of out) visit(r.repo, [])
-  return { repos: out, unassigned: steps.filter((s) => !s.repo).map((s) => ({ n: s.n, title: s.title, why: s.why })) }
+  // With a Files to Change list, a design step that names no repo is context, not lost work.
+  const unassigned = files.length ? [] : steps.filter((s) => !s.repo).map((s) => ({ n: s.n, title: s.title, why: s.why }))
+  return { repos: out, unassigned }
 }
 
 /** The rules from "Implementing a ticket" every plan session works under. */
@@ -103,12 +144,13 @@ const REPORT_FORMAT = `submit_report with:
 - open_questions, needs_from_orchestrator`
 
 function goalFor(planFile, r, name, parents) {
-  const steps = r.steps.map((s) => `### ${s.title}\n${s.body}`).join('\n\n')
+  const files = r.steps.filter((s) => s.file).map((s) => `- ${s.title}`)
+  const steps = [...r.steps.filter((s) => !s.file).map((s) => `### ${s.title}\n${s.body}`), ...(files.length ? [`### Files to Change (${r.repo})\n${files.join('\n')}`] : [])].join('\n\n')
   const upstream = parents.length
     ? `\n\nUpstream sessions this depends on have reported:\n${parents.map((p) => `- ${p.name} (${p.repo}, branch share/${p.name}): ${p.summary}`).join('\n')}`
     : ''
   return `Implement the \`${r.repo}\` part of the plan ${planFile}.
-Read the whole plan for context; only the steps below are yours. Work in your ${r.repo} worktree and commit on share/${name}.
+Read the whole plan for context; only the steps and files below are yours. Work in your ${r.repo} worktree (branched from the remote base in the brief, not the local checkout) and commit on share/${name}.
 
 ${steps}${upstream}`
 }
@@ -120,14 +162,23 @@ export const sessionName = (key, repo) => `${key}-${repo}`.replace(/[^A-Za-z0-9_
  * Run a plan: every repo's session, parents first, independent ones at once. Sessions that
  * already exist are not restarted: a reported one counts as done for its children, any other
  * is left for you to resume or close. Resolves with one line per repo.
+ *
+ * Each session runs on `models[repo]`, else `model`, else Opus 5.5. `onSettled` hears about
+ * each repo as it ends (reported, blocked, failed, or left waiting on a parent).
  */
-export async function runPlan(planFile, { store = openStore(), only = [], dry = false, say = console.log, ...sessionOpts } = {}) {
+export async function runPlan(
+  planFile,
+  { store = openStore(), only = [], dry = false, say = console.log, models = {}, model = DEFAULT_MODEL, onSettled = () => {}, ...sessionOpts } = {}
+) {
   const file = path.resolve(planFile)
   const plan = parsePlan(await fsp.readFile(file, 'utf8'), { isRepo: repoChecker(store.reposDir) })
   const key = planKey(file)
   for (const u of plan.unassigned) say(`! step ${u.n} "${u.title}" ${u.why}: not run. Name its repo in backticks in the heading to include it.`)
   const wanted = only.length ? plan.repos.filter((r) => only.includes(r.repo)) : plan.repos
-  if (dry) return wanted.map((r) => ({ name: sessionName(key, r.repo), repo: r.repo, steps: r.steps.map((s) => s.title), dependsOn: r.dependsOn, status: 'planned' }))
+  const modelOf = (repo) => models[repo] || model || DEFAULT_MODEL
+  if (dry) {
+    return wanted.map((r) => ({ name: sessionName(key, r.repo), repo: r.repo, steps: r.steps.map((s) => s.title), dependsOn: r.dependsOn, model: modelOf(r.repo), status: 'planned' }))
+  }
 
   await store.init()
   const runs = new Map()
@@ -135,6 +186,11 @@ export async function runPlan(planFile, { store = openStore(), only = [], dry = 
     if (runs.has(r.repo)) return runs.get(r.repo)
     const name = sessionName(key, r.repo)
     const p = (async () => {
+      const result = await settle()
+      if (result.status !== 'not-run') await Promise.resolve(onSettled(result)).catch(() => {})
+      return result
+    })()
+    async function settle() {
       const parents = []
       for (const parentRepo of r.dependsOn) {
         const parentPlan = plan.repos.find((x) => x.repo === parentRepo)
@@ -157,11 +213,11 @@ export async function runPlan(planFile, { store = openStore(), only = [], dry = 
       const state = await startSession(
         name,
         { goal: goalFor(file, r, name, parents), limits: IMPLEMENT_LIMITS, repos: [r.repo], reportFormat: REPORT_FORMAT, mode: 'implement' },
-        { store, ...sessionOpts }
+        { store, ...sessionOpts, model: modelOf(r.repo) }
       )
       say(`- ${name}: ${state.status}`)
       return { name, repo: r.repo, status: state.status }
-    })()
+    }
     runs.set(r.repo, p)
     return p
   }
