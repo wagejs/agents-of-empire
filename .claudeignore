@@ -1,0 +1,4 @@
+# Code graphs are queried through the graphify MCP servers, never read raw into context.
+# Claude Code does not read this file itself; the session hooks in server/session-tools.mjs enforce it.
+graphify-out/
+graph.json

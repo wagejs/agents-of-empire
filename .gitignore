@@ -32,3 +32,6 @@ public/dev-mobile.html
 # not. Same reasoning as the sound samples above: what is in the repository is MIT, and this
 # is the one part of the project deliberately kept out of that grant. See TRADEMARKS.md.
 design/character
+
+# The shared knowledge store, when BOT_CROSSING_STORE points it inside the app.
+.store/
