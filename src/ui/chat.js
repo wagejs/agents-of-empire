@@ -22,6 +22,7 @@ const TEMPLATE = `
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>
   <div class="chat-note" hidden></div>
+  <div class="chat-schedule" hidden></div>
   <div class="chat-log"></div>
   <form class="chat-form">
     <div class="slash-menu" role="listbox" hidden></div>
@@ -412,6 +413,32 @@ export class Chat {
     this.$('.sub').textContent = [this.harness, model && shortModel(model)].filter(Boolean).join(' · ')
   }
 
+  /**
+   * What the session has scheduled, each with Run now: it sends the schedule's own prompt, the
+   * very `/skill tick` a timer would, so a tick you ask for is the same as one that fires. A
+   * plain "tick" typed into the chat is only a message, and Claude may read it as "carry on".
+   */
+  showSchedule(crons = []) {
+    const bar = this.$('.chat-schedule')
+    bar.hidden = !crons.length
+    bar.replaceChildren(
+      ...crons.map((c) => {
+        const row = div('sched')
+        const run = document.createElement('button')
+        run.type = 'button'
+        run.className = 'btn'
+        run.textContent = 'Run now'
+        run.title = `Send ${c.prompt} now; the schedule carries on as before`
+        run.addEventListener('click', () => {
+          this.input.value = c.prompt
+          this.send()
+        })
+        row.append(div('sched-text', `⏰ ${c.schedule}  ${c.prompt}`), run)
+        return row
+      })
+    )
+  }
+
   /** A rename made while this thread's chat is up shows in its header at once. */
   retitle(id, title) {
     if (this.thread?.id === id) this.$('.title').textContent = title
@@ -438,6 +465,7 @@ export class Chat {
     this.$('.repo-pick').hidden = true
     this.input.placeholder = placeholder
     this.log.replaceChildren()
+    this.showSchedule([])
     remember(thread?.id)
     this.refreshNeedYou()
     this.sizeKey = thread ? thread.id : `new:${folder}`
@@ -530,6 +558,7 @@ export class Chat {
       // A reply still going from earlier, from before a reload or another thread's chat: pick
       // it up from its first word, since the history above stops short of it.
       if (run) {
+        this.showSchedule(run.crons)
         this.add('user', run.prompt)
         this.watch(run.id, this.add('assistant'), thread, run.prompt)
       }
@@ -694,6 +723,7 @@ export class Chat {
       return
     }
     if (event.type === 'model') return this.showModel(event.model)
+    if (event.type === 'schedule') return this.showSchedule(event.crons)
     this.live = null
     if (event.type === 'queued') this.add('user', event.text).classList.add('queued')
     // Claude Code has it now: the oldest message still waiting is no longer waiting.

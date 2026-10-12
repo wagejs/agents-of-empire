@@ -432,7 +432,7 @@ async function chat(pathname, req, res) {
       live: Boolean(target.live) && !run,
       busy: Boolean(target.busy) && !run,
       where: target.where || '',
-      run: run ? { id: run.id, prompt: run.prompt } : null,
+      run: run ? { id: run.id, prompt: run.prompt, crons: run.crons || [] } : null,
     })
   }
 

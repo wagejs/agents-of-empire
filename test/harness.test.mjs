@@ -836,3 +836,16 @@ test('kilocode refuses untrusted refs and opens the repo folder in VS Code', asy
     await fsp.rm(home, { recursive: true, force: true })
   }
 })
+
+test('a terminal thread whose last word is a reply asks for you, with no process left; mid-turn does not', async () => {
+  const replied = { type: 'assistant', message: { content: [{ type: 'text', text: 'done, over to you' }], stop_reason: 'end_turn' } }
+  const asking = await fakeClaude({ transcript: [typed('fix it'), replied] })
+  const [thread] = await (await claudeWith(asking)).scanThreads()
+  assert.equal(thread.unread, true, 'the reply is waiting for you even though the terminal is closed')
+  await fsp.rm(asking.root, { recursive: true, force: true })
+
+  const working = await fakeClaude({ transcript: [typed('fix it'), midTurn] })
+  const [busy] = await (await claudeWith(working)).scanThreads()
+  assert.equal(busy.unread, false, 'stopped mid tool call is not a question to you')
+  await fsp.rm(working.root, { recursive: true, force: true })
+})

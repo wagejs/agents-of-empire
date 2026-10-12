@@ -1785,6 +1785,40 @@ body {
   display: none;
 }
 
+/* A scheduled session's timers, each with Run now. */
+.chat-schedule {
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+}
+
+.chat-schedule[hidden] {
+  display: none;
+}
+
+.chat-schedule .sched {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-schedule .sched-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-schedule .btn {
+  height: 26px;
+  font-size: 12px;
+}
+
 .chat-form {
   display: flex;
   align-items: flex-end;

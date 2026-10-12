@@ -324,8 +324,8 @@ export class Hud {
         0,
         1,
         0.05,
-        (v) => `${Math.round(v * 100)}%`,
-        'How far the ground bends away toward the horizon. The point under the cursor never moves.'
+        (v) => (v === 0 ? 'Flat' : `${Math.round(v * 100)}%`),
+        'How far the ground bends away toward the horizon; all the way left is a flat world. The point under the cursor never moves.'
       ),
       this._toggle('Colour grade', 'colorGrade', 'Saturation, warmth, lifted shadows and a soft vignette on the finished frame.'),
       this._slider('Saturation', 'saturation', 0.6, 1.5, 0.05, (v) => v.toFixed(2)),

@@ -472,7 +472,19 @@ async function drive(run, target, text, query) {
         // Each turn's end says what the session has scheduled. While anything is, the session is
         // kept: its timers live in this process, and so do the questions they bring.
         hooks: {
-          Stop: [{ hooks: [async (hook) => ((run.crons = hook.session_crons || []), { continue: true })] }],
+          Stop: [
+            {
+              hooks: [
+                async (hook) => {
+                  const crons = hook.session_crons || []
+                  // Told to the page when it changes, so the chat can offer to run a tick now.
+                  if (JSON.stringify(crons) !== JSON.stringify(run.crons)) write({ type: 'schedule', crons })
+                  run.crons = crons
+                  return { continue: true }
+                },
+              ],
+            },
+          ],
         },
       },
     }))

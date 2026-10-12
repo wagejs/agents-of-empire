@@ -118,6 +118,8 @@ const HEAD_BYTES = 192 * 1024
  * warmed ones sat 16 hours to 3 days idle while genuinely active work was minutes old.
  */
 const ACTIVE_WINDOW_MS = 30 * 60 * 1000
+/** How long a reply nobody has answered keeps a thread asking for you, with no process behind it. */
+const REPLY_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /**
  * How long a subagent's transcript may sit untouched before its errand counts as abandoned.
@@ -644,8 +646,20 @@ async function scanThreads() {
     // and showed an idle thread as working for up to half an hour.
     thread.running = thread.liveStatus ? thread.liveStatus === 'busy' : thread.hasLiveProcess && fresh && !waiting
     // A thread that handed the turn back wants you, whether or not the desktop app has ever seen
-    // it — the only way a terminal-only thread can ask for anything at all.
+    // it — the only way a terminal-only thread can ask for anything at all. Its process need not
+    // still be there: a reply from the chat ends its process with the reply, and a terminal gets
+    // closed, and either way the answer is still waiting for you. Opening it in the page marks it
+    // seen (`viewedAt`), which is what puts the hand down.
+    // ponytail: a day's window, so a fresh install does not raise a hand over every old thread.
     if (waiting) thread.unread = true
+    else if (
+      !thread.running &&
+      thread.transcriptFile &&
+      now - thread.lastActivityAt < REPLY_WINDOW_MS &&
+      (await awaitingReply(thread.transcriptFile))
+    ) {
+      thread.unread = true
+    }
     const errands = subagents.get(thread.cliSessionId)
     if (errands) thread.subagents = errands
   }
