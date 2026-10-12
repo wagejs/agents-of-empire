@@ -17,7 +17,7 @@ import { LinkPanel } from './link-panel.js'
 const TEMPLATE = `
 <div class="sheet panel">
   <div class="chat-head">
-    <div class="info"><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
+    <div class="info"><div class="repo-tag" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
     <button class="btn ghost" data-next title="Next thread that needs you (⌥N)" hidden></button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>
@@ -159,7 +159,8 @@ export class Chat {
    * `needYou` lists the chattable threads asking for you, most pressing first; `go` takes the
    * popup, and the map, to one of them.
    */
-  constructor(parent, { onDone, needYou = () => [], go } = {}) {
+  constructor(parent, { onDone, needYou = () => [], go, repoOf = () => null } = {}) {
+    this.repoOf = repoOf
     this.onDone = onDone
     this.needYou = needYou
     this.go = go
@@ -408,6 +409,16 @@ export class Chat {
     }
   }
 
+  /** Which repo this chat is in, as a coloured tag above its title. */
+  showRepo(thread) {
+    const tag = this.$('.repo-tag')
+    const repo = thread && this.repoOf(thread)
+    tag.hidden = !repo
+    if (!repo) return
+    tag.textContent = repo.name
+    tag.style.setProperty('--repo', repo.color)
+  }
+
   /** The header's second line: the harness, and the model replying, as far as it is known. */
   showModel(model) {
     this.$('.sub').textContent = [this.harness, model && shortModel(model)].filter(Boolean).join(' · ')
@@ -459,6 +470,7 @@ export class Chat {
     this.folder = folder
     this.blocked = false
     this.$('.title').textContent = title
+    this.showRepo(thread)
     this.harness = sub
     this.showModel(thread?.model)
     this.$('.sub').hidden = false
@@ -670,6 +682,7 @@ export class Chat {
       this.$('.repo-pick').hidden = true
       this.$('.sub').hidden = false
       this.$('.title').textContent = current.title
+      this.showRepo(current)
       this.input.placeholder = MESSAGE_PLACEHOLDER
       remember(current.id)
       // The new thread keeps the size its empty popup had.

@@ -2367,3 +2367,28 @@ kbd {
   }
 }
 .bot-crossing-canvas { cursor: grab; }
+
+/* The repo a chat is in, in its plot's colour: where you are after a jump between chats. */
+.chat .repo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--repo);
+}
+
+.chat .repo-tag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--repo);
+  box-shadow: 0 0 6px var(--repo);
+}
+
+.chat .repo-tag[hidden] {
+  display: none;
+}

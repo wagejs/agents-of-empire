@@ -5,6 +5,7 @@ import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
 import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
+import { PLOT_PALETTE, hashString } from './world/plots.js'
 import { Chat, lastChat } from './ui/chat.js'
 import { Search } from './ui/search.js'
 import { PLANETS } from './world/planet.js'
@@ -356,6 +357,13 @@ const chat = new Chat(hud.el, {
     if (thread && chat.isOpen && chat.thread?.id === thread.id) markSeen(thread)
   },
   needYou: needYouThreads,
+  // The repo a chat belongs to, in the colour its plot wears on the map and in the list, so a
+  // jump between chats always says where you landed.
+  repoOf: (thread) => {
+    const name = thread.project || ''
+    const accent = colony.plots.get(name)?.accent ?? PLOT_PALETTE[hashString(name) % PLOT_PALETTE.length]
+    return name && { name, color: '#' + (accent >>> 0).toString(16).padStart(6, '0').slice(-6) }
+  },
   go: (thread) => {
     select(thread.id, { fly: true })
     chat.open(thread)
