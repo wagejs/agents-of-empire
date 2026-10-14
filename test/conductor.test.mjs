@@ -48,55 +48,78 @@ await fsp.writeFile(
 )
 const store = openStore()
 
-/** A fake Sonnet: records what it was asked, answers with `reading`. */
-const reader = (reading, asked = []) => ({ prompt, options }) =>
+/** A fake Opus: records what it was asked, answers each repo with an exercise. */
+const exerciser = (asked = []) => ({ prompt, options }) =>
   (async function* () {
     asked.push({ prompt, options })
-    yield { type: 'result', subtype: 'success', structured_output: reading }
+    const repo = /^Repo: (\S+)\./m.exec(prompt)[1]
+    yield { type: 'result', subtype: 'success', total_cost_usd: 0.5, structured_output: { summary: `${repo} takes country_code.`, changes: [{ file: 'a.txt', change: 'read the param (a.txt:1)' }], tests: ['a_test: reads it'], risks: [], questions: [`${repo}: default country?`] } }
   })()
 
-test('preview: Sonnet reads the plan, sessions are on Opus 5.5 by default, and mismatches are said', async () => {
+const exerciseDone = async (job) => {
+  for (let i = 0; i < 200; i++) {
+    const { json } = await shareRoute('/api/share/exercise', { job }, { store })
+    if (json.done) return json
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error('exercise never finished')
+}
+
+test('preview exercises the plan with Opus against each repo worktree, read-only; sessions default to Sonnet', async () => {
   const asked = []
-  const reading = { summary: 'Adds a country param.', repos: [{ repo: 'be-api', changes: ['handler reads country'] }, { repo: 'infra', changes: ['new env var'] }] }
-  const { status, json } = await shareRoute('/api/share/preview', { plan }, { store, query: reader(reading, asked) })
-  assert.equal(asked[0].options.model, 'claude-sonnet-5')
-  assert.deepEqual(asked[0].options.tools, [], 'it only reads')
-  assert.equal(asked[0].options.persistSession, false)
-  assert.match(asked[0].prompt, /### 3\. Ops/, 'the whole plan is sent')
-  assert.match(asked[0].prompt, /be-api, fe-web/, 'with the repos on this machine')
-  assert.equal(json.summary, 'Adds a country param.')
-  assert.deepEqual(json.repos, reading.repos)
-  assert.match(json.warnings.join('\n'), /infra: the plan changes it, but no step is assigned/)
-  assert.match(json.warnings.join('\n'), /fe-web: a session starts for it, but the reading found no change/)
-  const noSteps = path.join(tmp, 'PROJ-1-freeform.md')
-  await fsp.writeFile(noSteps, '# PROJ-1\n\nJust prose about `be-api`.\n')
-  const free = (await shareRoute('/api/share/preview', { plan: noSteps }, { store, query: reader(reading) })).json
-  assert.deepEqual(free.sessions, [], 'a plan with no steps section still previews')
-  assert.equal(free.summary, 'Adds a country param.')
-  const failed = () => (async function* () { yield { type: 'result', subtype: 'error_max_structured_output_retries' } })()
-  await assert.rejects(shareRoute('/api/share/preview', { plan }, { store, query: failed }), /Could not read the plan/)
+  const { status, json } = await shareRoute('/api/share/preview', { plan }, { store, query: exerciser(asked), serveCheck: () => false, run: async () => {} })
   assert.equal(status, 200)
   assert.deepEqual(json.sessions.map((s) => [s.name, s.model, s.dependsOn]), [
-    ['PROJ-7777-be-api', 'claude-opus-5-5', []],
-    ['PROJ-7777-fe-web', 'claude-opus-5-5', ['be-api']],
+    ['PROJ-7777-be-api', 'sonnet', []],
+    ['PROJ-7777-fe-web', 'sonnet', ['be-api']],
   ])
-  assert.equal(json.models[0].id, 'claude-opus-5-5')
+  assert.equal(json.models[0].id, 'sonnet')
   assert.equal(json.home, CONDUCTOR_HOME)
   assert.match(json.warnings.join('\n'), /step 3 "3. Ops" names no repo/)
-  await assert.rejects(shareRoute('/api/share/preview', { plan: path.join(tmp, 'nope.md') }, { store, query: failed }), /No file/)
-  await assert.rejects(shareRoute('/api/share/preview', { plan: path.join(tmp, 'x.txt') }, { store, query: failed }), /\.md/)
+
+  const done = await exerciseDone(json.job)
+  assert.deepEqual(Object.values(done.repos).map((r) => r.status), ['done', 'done'])
+  assert.equal(done.repos['be-api'].exercise.summary, 'be-api takes country_code.')
+  const be = asked.find((a) => /Repo: be-api/.test(a.prompt))
+  assert.equal(be.options.model, 'claude-opus-5-5')
+  assert.match(be.options.cwd, /repos\/be-api\/\.claude\/worktrees\/share-PROJ-7777-be-api$/, 'in the worktree the session will use')
+  assert.match(be.prompt, /branched from origin\/main/)
+  assert.match(be.prompt, /### 3\. Ops/, 'the whole plan is sent')
+  assert.equal(be.options.persistSession, false)
+  assert.equal((await be.options.canUseTool('Bash', { command: 'grep -rn country .' })).behavior, 'allow')
+  for (const command of ['go test ./...', 'git commit -m x', 'git push']) assert.equal((await be.options.canUseTool('Bash', { command })).behavior, 'deny', command)
+  assert.ok(!be.options.tools.includes('Edit') && !be.options.tools.includes('Write'), 'it cannot edit')
+
+  // Unchanged plan: the kept exercise is used, Opus is not asked again.
+  const again = await shareRoute('/api/share/preview', { plan }, { store, query: exerciser(asked), serveCheck: () => false, run: async () => {} })
+  const reused = await exerciseDone(again.json.job)
+  assert.equal(asked.length, 2)
+  assert.ok(Object.values(reused.repos).every((r) => r.reused))
+
+  const failed = () => (async function* () { yield { type: 'result', subtype: 'error_max_turns' } })()
+  const original = await fsp.readFile(plan, 'utf8')
+  await fsp.appendFile(plan, '\n<!-- edited -->\n')
+  const broken = await shareRoute('/api/share/preview', { plan }, { store, query: failed, serveCheck: () => false, run: async () => {} })
+  const after = await exerciseDone(broken.json.job)
+  assert.match(after.repos['be-api'].error, /could not finish the exercise \(error_max_turns\)/)
+  const { readExercise, exerciseHash } = await import('../server/plan.mjs')
+  assert.equal(readExercise(store, 'PROJ-7777-be-api', exerciseHash(await fsp.readFile(plan, 'utf8'), 'be-api', ['1. `be-api`: param'])), null, 'an exercise of the old plan does not count for the edited one')
+  await fsp.writeFile(plan, original)
+  assert.equal((await shareRoute('/api/share/exercise', { job: 'nope' }, { store })).status, 404)
+  await assert.rejects(shareRoute('/api/share/preview', { plan: path.join(tmp, 'nope.md') }, { store }), /No file/)
+  await assert.rejects(shareRoute('/api/share/preview', { plan: path.join(tmp, 'x.txt') }, { store }), /\.md/)
 })
 
-test('the orchestrator starts in ~/.claude, on Opus 5.5, with its tools, and an unknown model is refused', async () => {
+test('the orchestrator starts in ~/.claude, on Opus 5.5, with its tools; repo models as picked; an unknown model is refused', async () => {
   let started
   const start = (target, text) => ((started = { target, text }), { id: 'run-1', sessionId: '', events: [], listeners: new Set(), done: false })
-  await startConductor(plan, { 'fe-web': 'sonnet' }, { store, start })
+  await startConductor(plan, { 'fe-web': 'claude-opus-5-5' }, { store, start })
   assert.equal(started.target.cwd, CONDUCTOR_HOME)
   assert.equal(started.target.model, 'claude-opus-5-5')
   assert.ok(started.target.options.mcpServers.orchestrator)
   assert.ok(started.target.options.allowedTools.includes('mcp__orchestrator__run_plan'))
   assert.ok(!started.target.options.allowedTools.includes('mcp__orchestrator__approve_report'), 'approving always asks')
-  assert.match(started.text, /"be-api":"claude-opus-5-5","fe-web":"sonnet"/)
+  assert.match(started.text, /"be-api":"sonnet","fe-web":"claude-opus-5-5"/)
   await assert.rejects(startConductor(plan, { 'fe-web': 'gpt-9' }, { store, start }), /Unknown model/)
 })
 
@@ -105,7 +128,7 @@ test('run_plan starts repo sessions in their worktrees on their models, and tell
   const query = ({ prompt, options }) =>
     (async function* () {
       const name = /# Brief: (\S+)/.exec(prompt)[1]
-      seen.push({ name, cwd: options.cwd, model: options.model })
+      seen.push({ name, cwd: options.cwd, model: options.model, prompt })
       yield { type: 'system', subtype: 'init', session_id: `sid-${name}` }
       await toolHandlers(store, name).submit_report({ status: 'done', summary: `${name} done`, decisions: [], facts: [] })
       yield { type: 'result', subtype: 'success', total_cost_usd: 0.01 }
@@ -114,12 +137,16 @@ test('run_plan starts repo sessions in their worktrees on their models, and tell
   const start = (target, text) => told.push({ sessionId: target.sessionId, cwd: target.cwd, text })
   const h = conductorHandlers({ id: 'conductor-1' }, { store, query, start, serveCheck: () => true, run: async () => {} })
 
-  const out = JSON.parse((await h.run_plan({ plan_path: plan, models: { 'fe-web': 'sonnet' } })).content[0].text)
-  assert.deepEqual(out.started.map((s) => [s.repo, s.model]), [['be-api', 'claude-opus-5-5'], ['fe-web', 'sonnet']])
+  const out = JSON.parse((await h.run_plan({ plan_path: plan, models: { 'fe-web': 'claude-opus-5-5' } })).content[0].text)
+  assert.deepEqual(out.started.map((s) => [s.repo, s.model]), [['be-api', 'sonnet'], ['fe-web', 'claude-opus-5-5']])
   // Started in the background: wait for both to be told.
   for (let i = 0; i < 100 && told.length < 2; i++) await new Promise((r) => setTimeout(r, 20))
 
-  assert.deepEqual(seen.map((s) => [s.name, s.model]), [['PROJ-7777-be-api', 'claude-opus-5-5'], ['PROJ-7777-fe-web', 'sonnet']])
+  assert.deepEqual(seen.map((s) => [s.name, s.model]), [['PROJ-7777-be-api', 'sonnet'], ['PROJ-7777-fe-web', 'claude-opus-5-5']])
+  // The exercise from the preview is in the brief Sonnet starts from.
+  assert.match(seen[0].prompt, /## Exercise\nOpus read the plan against this code/)
+  assert.match(seen[0].prompt, /- `a\.txt`: read the param \(a\.txt:1\)/)
+  assert.match(seen[0].prompt, /- be-api: default country\?/)
   for (const s of seen) assert.match(s.cwd, new RegExp(`/repos/${s.name.slice(8)}/\\.claude/worktrees/share-${s.name}$`), 'opens in its own worktree')
   assert.deepEqual(told.map((t) => [t.sessionId, t.cwd]), [['conductor-1', CONDUCTOR_HOME], ['conductor-1', CONDUCTOR_HOME]])
   assert.match(told[0].text, /PROJ-7777-be-api ended reported/)
@@ -156,7 +183,7 @@ test('shareRoles tags the orchestrator and each repo session with the plan they 
   }
   const roles = shareRoles(roleStore)
   assert.deepEqual(roles.get('sid-orch'), { role: 'orchestrator', plan: 'PROJ-5', file: '/p/PROJ-5-x.md' })
-  assert.deepEqual(roles.get('sid-be'), { role: 'child', plan: 'PROJ-5', name: 'PROJ-5-be-api', repo: 'be-api', status: 'reported' })
+  assert.deepEqual(roles.get('sid-be'), { role: 'child', plan: 'PROJ-5', name: 'PROJ-5-be-api', repo: 'be-api', status: 'reported', asks: [], push_approved: 0 })
   assert.equal(roles.size, 2, 'a session that never got a session id is not on the map yet')
 })
 

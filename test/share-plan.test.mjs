@@ -9,7 +9,8 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { openStore } from '../server/store.mjs'
-import { bashAllowed, IMPLEMENT_BASH, toolHandlers } from '../server/session-tools.mjs'
+import { bashAllowed, sessionHooks, sessionPermissions, toolHandlers } from '../server/session-tools.mjs'
+import { answerPermit, classify, dropAsks, onAsk, pendingAsks, readPermits, TRUST_AFTER } from '../server/permit.mjs'
 import { parsePlan, planKey, runPlan } from '../server/plan.mjs'
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'share-plan-'))
@@ -149,7 +150,7 @@ test('a dependent repo starts after its parent reports, with the parent summary 
   assert.match(brief, /PROJ-9999-be-api \(be-api, branch share\/PROJ-9999-be-api\): PROJ-9999-be-api added country_code/)
   assert.match(brief, /### 3\. Frontend sends it/)
   assert.doesNotMatch(brief, /### 1\. `be-api`/, 'only its own steps')
-  assert.match(brief, /Never push/)
+  assert.match(brief, /Never rebase, never force-push/)
   assert.equal((await store.readState('PROJ-9999-be-api')).mode, 'implement')
 
   // Running the plan again restarts nothing.
@@ -177,17 +178,70 @@ test('--dry starts nothing; --only starts just that repo', async () => {
   assert.deepEqual(out.map((r) => [r.repo, r.status]), [['be-api', 'reported']])
 })
 
-test('implementing sessions may build, test and commit, but not push or script freely', () => {
-  const wt = '/w/be-api/.claude/worktrees/share-x'
-  for (const cmd of [`cd ${wt} && go test ./...`, 'go vet ./... | head', `git -C ${wt} commit -m "feat: country_code"`, 'git add -A && git commit -m x', 'npm run lint', 'npx jest src/a.test.js', 'make test']) {
-    assert.ok(bashAllowed(cmd, IMPLEMENT_BASH), cmd)
+const until = async (fn) => {
+  for (let i = 0; i < 200 && !fn(); i++) await new Promise((r) => setTimeout(r, 5))
+  assert.ok(fn(), 'timed out')
+}
+
+test('an implementing session runs allow-all; pushes, risky commands and your ask rules wait for you', async () => {
+  const store = openStore(path.join(tmp, 'permit-store'), { reposDir })
+  await store.init()
+  const wt = path.join(reposDir, 'be-api', '.claude', 'worktrees', 'share-x')
+  const writable = [store.sessionDir('x'), wt]
+  const gate = { repo: 'be-api', rules: ['Bash(gh api * -X *)', 'mcp__acme-dev'] }
+  const asked = []
+  onAsk((a) => asked.push(a))
+  const can = sessionPermissions(store, 'x', writable, { gate })
+  const run = (command) => can('Bash', { command })
+  const PR = ['gh', 'pr', 'create', '--fill'].join(' ')
+
+  // Runs: builds, tests, scripts, anything inside the worktree.
+  for (const cmd of [`cd ${wt} && go test ./...`, 'python3 x.py', 'curl https://example.com', 'npm run lint', 'git commit -m x']) {
+    assert.equal((await run(cmd)).behavior, 'allow', cmd)
   }
-  for (const cmd of ['node -e "require(\'fs\').writeFileSync(\'/etc/x\',1)"', 'curl https://x', 'git push origin HEAD', 'go test ./... && curl x', 'python3 x.py']) {
-    assert.ok(!bashAllowed(cmd, IMPLEMENT_BASH), cmd)
+  assert.equal((await can('Edit', { file_path: path.join(wt, 'a.go') })).behavior, 'allow')
+  assert.equal((await can('Edit', { file_path: '/etc/hosts' })).behavior, 'deny', 'writes stay in the worktree')
+  for (const cmd of ['git rebase main', 'git push --force origin x', 'git push -f']) assert.equal((await run(cmd)).behavior, 'deny', cmd)
+
+  // Waits: each kind is held until answered, then recorded.
+  assert.equal(classify('Bash', { command: 'kubectl apply -f x.yaml' }).kind, 'danger')
+  assert.equal(classify('Bash', { command: 'make deploy-dev' }, ['Bash(make deploy*)']).kind, 'rule')
+  assert.equal(classify('mcp__acme-dev__create_order', {}, gate.rules).kind, 'rule')
+  assert.equal(classify('Bash', { command: 'go test ./...' }, gate.rules), null)
+  const held = run('kubectl apply -f x.yaml')
+  await until(() => asked.length === 1)
+  assert.deepEqual([asked[0].kind, asked[0].repo, asked[0].session], ['danger', 'be-api', 'x'])
+  await answerPermit(store, pendingAsks()[0].id, 'deny')
+  assert.equal((await held).behavior, 'deny')
+
+  // Five approved pushes, and that repo's sessions push without asking; another repo still asks.
+  for (let i = 1; i <= TRUST_AFTER; i++) {
+    const push = run('git push -u origin share/x')
+    await until(() => pendingAsks().length === 1)
+    const r = await answerPermit(store, pendingAsks()[0].id, 'allow')
+    assert.equal((await push).behavior, 'allow')
+    assert.equal(r.push_approved, i)
   }
-  // A research session runs only read-only commands.
-  assert.ok(!bashAllowed('go test ./...', null))
-  assert.ok(bashAllowed(`git -C ${wt} rev-parse HEAD`, null))
+  assert.equal((await run(PR)).behavior, 'allow', 'trusted: no ask')
+  assert.equal(pendingAsks().length, 0)
+  const rec = readPermits(store).repos['be-api']
+  assert.equal(rec.push_approved, TRUST_AFTER)
+  assert.equal(rec.decisions.at(-1).auto, true, 'an automatic allow is still written down')
+  const other = sessionPermissions(store, 'y', [store.sessionDir('y')], { gate: { repo: 'fe-web', rules: [] } })
+  const otherPush = other('Bash', { command: 'git push' })
+  await until(() => pendingAsks().length === 1)
+  dropAsks('y')
+  assert.equal((await otherPush).behavior, 'deny', 'a session that ends drops its asks')
+
+  // The hook sends what waits to the prompt even when a settings rule would allow it.
+  const hooks = sessionHooks(store, 'x', writable, undefined, { gate })
+  const out = await hooks.PreToolUse[0].hooks[0]({ tool_name: 'Bash', tool_input: { command: 'kubectl delete pod x' }, cwd: wt })
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'ask')
+  assert.deepEqual(await hooks.PreToolUse[0].hooks[0]({ tool_name: 'Bash', tool_input: { command: 'go test ./...' }, cwd: wt }), {})
+
+  // A research session still runs only read-only commands, and never pushes.
+  assert.ok(!bashAllowed('go test ./...'))
+  assert.equal((await sessionPermissions(store, 'r', writable)('Bash', { command: 'git push' })).behavior, 'deny')
 })
 
 test.after(() => fsp.rm(tmp, { recursive: true, force: true }))

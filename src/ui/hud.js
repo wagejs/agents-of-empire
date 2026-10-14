@@ -635,7 +635,7 @@ export class Hud {
    * A row flies the camera to that session's astronaut and follows it. `runs` is `[{ plan, rows: [{ thread, role, name, status, step, urgent }] }]`.
    */
   setRuns(runs) {
-    const signature = JSON.stringify(runs.map((r) => [r.plan, r.rows.map((x) => [x.thread.id, x.name, x.status, x.step, x.urgent])]))
+    const signature = JSON.stringify(runs.map((r) => [r.plan, r.rows.map((x) => [x.thread.id, x.name, x.status, x.step, x.urgent, x.asks.map((a) => a.id), x.pushApproved])]))
     if (this._last.runs === signature) return
     this._last.runs = signature
     const urgent = runs.some((r) => r.rows.some((x) => x.urgent))
@@ -645,7 +645,7 @@ export class Hud {
     const wrap = this.$('.run-list')
     wrap.innerHTML = ''
     if (!runs.length) {
-      wrap.innerHTML = '<p class="run-empty">No shared runs yet. Start one from the checklist button above.</p>'
+      wrap.innerHTML = '<p class="run-empty">No shared runs yet. Start one with Run a plan above.</p>'
       return
     }
     for (const run of runs) {
@@ -662,9 +662,25 @@ export class Hud {
           `<i class="role-dot"></i>` +
           `<span class="n">${escapeHtml(x.name)}</span>` +
           (x.urgent ? '<i class="alarm"></i>' : '') +
-          `<span class="count">${escapeHtml(x.step ? `${x.status} · ${x.step}` : x.status)}</span>`
+          `<span class="count">${escapeHtml([x.status, x.step, x.pushApproved >= 5 ? 'pushes on its own' : ''].filter(Boolean).join(' · '))}</span>`
         b.addEventListener('click', () => this.actions.trackThread?.(x.thread))
         block.appendChild(b)
+        // What it is holding for you: the command, why it waits, and your two answers.
+        for (const a of x.asks) {
+          const ask = document.createElement('div')
+          ask.className = `run-ask ${a.kind}`
+          ask.innerHTML =
+            `<div class="why">${escapeHtml(a.kind === 'push' ? `Push / PR · ${x.pushApproved ?? 0} of 5 approved for ${x.name}` : a.reason)}</div>` +
+            `<code>${escapeHtml(a.command)}</code>` +
+            `<div class="answers"><button type="button" class="btn primary" data-answer="allow">Allow</button><button type="button" class="btn" data-answer="deny">Deny</button></div>`
+          for (const btn of ask.querySelectorAll('[data-answer]')) {
+            btn.addEventListener('click', () => {
+              for (const other of ask.querySelectorAll('button')) other.disabled = true
+              this.actions.answerAsk?.(a.id, btn.dataset.answer)
+            })
+          }
+          block.appendChild(ask)
+        }
       }
       wrap.appendChild(block)
     }
@@ -1223,7 +1239,6 @@ const TEMPLATE = `
   <div class="grab"></div>
   <header class="brandbar">
     <div class="brand"><i class="dot"></i>Bot Crossing</div>
-    <button class="btn icon ghost" id="btn-plan" title="Run a plan as shared sessions">${ICON.plan}</button>
     <button class="btn icon ghost" id="btn-search" title="Search every thread, archived too (/)">${ICON.search}</button>
     <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
     <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
@@ -1232,6 +1247,10 @@ const TEMPLATE = `
   </header>
 
   <div class="stats"></div>
+
+  <div class="plan-bar">
+    <button type="button" class="btn primary" id="btn-plan" title="Preview a plan.md, then start its orchestrator and one session per repo">${ICON.plan}<span>Run a plan</span></button>
+  </div>
 
   <div class="side-body">
     <div class="side-tabs" role="tablist">

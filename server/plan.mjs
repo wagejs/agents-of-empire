@@ -11,10 +11,11 @@
  * A repo session starts once every parent has reported, with their summaries in its brief. A
  * parent that ends any other way (blocked, failed) leaves its children unstarted.
  */
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { collectReport, DEFAULT_MODEL, startSession } from './orchestrator.mjs'
+import { collectReport, startSession } from './orchestrator.mjs'
 import { openStore } from './store.mjs'
 
 const STEP_SECTIONS = [/^##\s+implementation steps\b/i, /^##\s+implementation\b/i, /^##\s+design\b/i]
@@ -129,7 +130,7 @@ export function parsePlan(text, { isRepo }) {
 /** The rules from "Implementing a ticket" every plan session works under. */
 export const IMPLEMENT_LIMITS = [
   'The plan is the scope. Do only your steps; anything else goes in open_questions.',
-  'Commit on your branch in your worktree, in small commits. Never push, never rebase, never force.',
+  'Commit on your branch in your worktree, in small commits. Never rebase, never force-push. Pushing and opening a PR wait for the user to allow them, so do them last, once tests pass.',
   'Stop and report (submit_report with status "partial") on: the same test or build error twice after a fix attempt; 15 minutes with no progress; a change to a high-risk area the plan did not name (database migrations, payments, authentication, shared configuration, public APIs, shared libraries, routing); or a migration turning out to be needed.',
   'A stop report has: what was tried, the exact error, the current diff, and one suggested next step.',
   'Keep each pull request to one or two concerns: if your steps span more, say how to split them in decisions.',
@@ -143,7 +144,7 @@ const REPORT_FORMAT = `submit_report with:
 - artifacts: one per commit, path "<repo>@<short sha>", description = the commit subject
 - open_questions, needs_from_orchestrator`
 
-function goalFor(planFile, r, name, parents) {
+function goalFor(planFile, r, name, parents, exercise) {
   const files = r.steps.filter((s) => s.file).map((s) => `- ${s.title}`)
   const steps = [...r.steps.filter((s) => !s.file).map((s) => `### ${s.title}\n${s.body}`), ...(files.length ? [`### Files to Change (${r.repo})\n${files.join('\n')}`] : [])].join('\n\n')
   const upstream = parents.length
@@ -152,7 +153,47 @@ function goalFor(planFile, r, name, parents) {
   return `Implement the \`${r.repo}\` part of the plan ${planFile}.
 Read the whole plan for context; only the steps and files below are yours. Work in your ${r.repo} worktree (branched from the remote base in the brief, not the local checkout) and commit on share/${name}.
 
-${steps}${upstream}`
+${steps}${upstream}${exercise ? `\n\n${renderExercise(exercise)}` : ''}`
+}
+
+/** What a repo session implements on: the latest Sonnet. Opus already exercised the plan. */
+export const IMPLEMENT_MODEL = 'sonnet'
+
+/** Where a repo session's exercise is kept: Opus's reading of the plan against that repo's code. */
+export const exerciseFile = (store, name) => path.join(store.paths.root, 'exercises', `${name}.json`)
+
+/** The plan an exercise was made from: an edited plan, or other steps, needs a new one. */
+export const exerciseHash = (planText, repo, stepTitles) => createHash('sha1').update(`${planText}\n${repo}\n${stepTitles.join('\n')}`).digest('hex')
+
+/** The kept exercise for a session, if there is one for this exact plan (`hash`, when given). */
+export function readExercise(store, name, hash) {
+  try {
+    const ex = JSON.parse(fs.readFileSync(exerciseFile(store, name), 'utf8'))
+    return !hash || ex.plan_hash === hash ? ex : null
+  } catch {
+    return null
+  }
+}
+
+/** An exercise as the brief gives it to the session that implements it. */
+export function renderExercise(ex) {
+  const list = (items) => (items?.length ? items.map((x) => `- ${x}`).join('\n') : '- (none)')
+  return `## Exercise
+Opus read the plan against this code before you started. Follow it; where the code does not match it, say so in open_questions rather than improvise.
+
+${ex.summary}
+
+### Changes
+${ex.changes?.length ? ex.changes.map((c) => `- \`${c.file}\`: ${c.change}`).join('\n') : '- (none)'}
+
+### Tests
+${list(ex.tests)}
+
+### Risks
+${list(ex.risks)}
+
+### Open questions
+${list(ex.questions)}`
 }
 
 /** Session name for a repo's part of a plan. */
@@ -168,14 +209,15 @@ export const sessionName = (key, repo) => `${key}-${repo}`.replace(/[^A-Za-z0-9_
  */
 export async function runPlan(
   planFile,
-  { store = openStore(), only = [], dry = false, say = console.log, models = {}, model = DEFAULT_MODEL, onSettled = () => {}, ...sessionOpts } = {}
+  { store = openStore(), only = [], dry = false, say = console.log, models = {}, model = IMPLEMENT_MODEL, onSettled = () => {}, ...sessionOpts } = {}
 ) {
   const file = path.resolve(planFile)
-  const plan = parsePlan(await fsp.readFile(file, 'utf8'), { isRepo: repoChecker(store.reposDir) })
+  const planText = await fsp.readFile(file, 'utf8')
+  const plan = parsePlan(planText, { isRepo: repoChecker(store.reposDir) })
   const key = planKey(file)
   for (const u of plan.unassigned) say(`! step ${u.n} "${u.title}" ${u.why}: not run. Name its repo in backticks in the heading to include it.`)
   const wanted = only.length ? plan.repos.filter((r) => only.includes(r.repo)) : plan.repos
-  const modelOf = (repo) => models[repo] || model || DEFAULT_MODEL
+  const modelOf = (repo) => models[repo] || model || IMPLEMENT_MODEL
   if (dry) {
     return wanted.map((r) => ({ name: sessionName(key, r.repo), repo: r.repo, steps: r.steps.map((s) => s.title), dependsOn: r.dependsOn, model: modelOf(r.repo), status: 'planned' }))
   }
@@ -212,7 +254,7 @@ export async function runPlan(
       say(`- ${name}: starting (${r.steps.length} step${r.steps.length === 1 ? '' : 's'})`)
       const state = await startSession(
         name,
-        { goal: goalFor(file, r, name, parents), limits: IMPLEMENT_LIMITS, repos: [r.repo], reportFormat: REPORT_FORMAT, mode: 'implement' },
+        { goal: goalFor(file, r, name, parents, readExercise(store, name, exerciseHash(planText, r.repo, r.steps.map((x) => x.title)))), limits: IMPLEMENT_LIMITS, repos: [r.repo], reportFormat: REPORT_FORMAT, mode: 'implement' },
         { store, ...sessionOpts, model: modelOf(r.repo) }
       )
       say(`- ${name}: ${state.status}`)

@@ -29,6 +29,7 @@ import {
   newSession,
   renameThread,
   revealFolder,
+  shareAnswer,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
@@ -157,6 +158,16 @@ const actions = {
   pickProject: (name) => selectProject(name, { fly: true }),
   // From the Orchestrations tab: fly to that session's astronaut and keep the camera on it.
   // Not `openThread`: that one already opens the selected thread in its harness.
+  // Your Allow or Deny for a command a repo session is holding, from the Orchestrations tab.
+  answerAsk: async (id, choice) => {
+    try {
+      const r = await shareAnswer(id, choice)
+      hud.toast(choice === 'allow' ? (r.trusted ? `Allowed. ${r.repo} now pushes and opens PRs on its own` : 'Allowed') : 'Denied')
+    } catch (err) {
+      hud.toast(err.message, 'err')
+    }
+    poll()
+  },
   trackThread: (thread) => {
     select(thread.id, { fly: true })
     const agent = colony.agentFor(thread.id)
@@ -1129,6 +1140,8 @@ function applyThreads(list) {
     // A reply running from the chat is work, whatever the process registry says, and one
     // waiting on Allow / Deny wants you, however recently you looked.
     if (t.chat === 'approval') return { ...seen, running: false, unread: true }
+    // A repo session holding a command for your Allow is waiting on you, whatever it was doing.
+    if (t.share?.asks?.length) return { ...seen, running: false, unread: true }
     if (t.chat === 'running') return { ...seen, running: true }
     return seen
   })
@@ -1204,6 +1217,8 @@ function shareRuns(list, archivedSet) {
       status: STATUS_LABEL[status] || status,
       step: t.share.role === 'child' && t.share.status !== 'running' ? t.share.status : '',
       urgent: status === 'waiting' || status === 'blocked',
+      asks: t.share.asks || [],
+      pushApproved: t.share.role === 'child' ? t.share.push_approved || 0 : null,
     })
     run.at = Math.max(run.at, t.lastActivityAt || 0)
     runs.set(t.share.plan, run)

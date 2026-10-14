@@ -10,6 +10,7 @@
  * Reading tools run without asking. Starting a plan was your click; approving, closing or
  * answering a repo session asks you on the page, every time.
  */
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
@@ -18,8 +19,10 @@ import { createSdkMcpServer, query as sdkQuery, tool } from '@anthropic-ai/claud
 import { z } from 'zod'
 import { activeRun, attachRun, provideSessionOptions, queueMessage, startRun } from './chat.mjs'
 import { cliBinary, newChatThread } from './harnesses/claude-code.mjs'
-import { approveReport, closeSession, collectReport, DEFAULT_MODEL, resumeSession } from './orchestrator.mjs'
-import { planKey, repoChecker, runPlan } from './plan.mjs'
+import { approveReport, closeSession, collectReport, DEFAULT_MODEL, prepareRepos, resumeSession } from './orchestrator.mjs'
+import { exerciseFile, exerciseHash, IMPLEMENT_MODEL, planKey, readExercise, runPlan } from './plan.mjs'
+import { bashAllowed, canServeGraph, graphServers } from './session-tools.mjs'
+import { answerPermit, onAsk, pendingAsks, readPermits } from './permit.mjs'
 import { readMessages } from './scan.mjs'
 import { openStore, writeAtomic } from './store.mjs'
 
@@ -27,8 +30,8 @@ export const CONDUCTOR_HOME = process.env.CLAUDE_CONFIG_DIR || path.join(os.home
 
 /** Models a repo session can be given. The first is the default. */
 export const SESSION_MODELS = [
+  { id: IMPLEMENT_MODEL, label: 'Sonnet (latest)' },
   { id: DEFAULT_MODEL, label: 'Opus 5.5' },
-  { id: 'sonnet', label: 'Sonnet (latest)' },
   { id: 'haiku', label: 'Haiku (latest)' },
 ]
 const modelOk = (m) => SESSION_MODELS.some((x) => x.id === m)
@@ -46,6 +49,7 @@ You are the orchestrator for shared sessions. Each repo in a plan gets its own C
 // Which sessions are orchestrators
 
 const shared = (globalThis[Symbol.for('bot-crossing.conductor')] ??= { plans: new Map() })
+shared.jobs ??= new Map()
 
 function registryFile(store) {
   return path.join(store.paths.root, 'conductors.json')
@@ -72,6 +76,7 @@ async function register(store, sessionId, entry) {
  */
 export function shareRoles(store = openStore()) {
   const roles = new Map()
+  const permits = readPermits(store)
   for (const [sid, c] of Object.entries(readRegistry(store))) {
     roles.set(sid, { role: 'orchestrator', plan: planKey(c.plan), file: c.plan })
   }
@@ -86,10 +91,34 @@ export function shareRoles(store = openStore()) {
     if (!state.session_id) continue
     const repo = state.repos?.[0]?.name || ''
     const plan = repo && name.endsWith(`-${repo}`) ? name.slice(0, -repo.length - 1) : name
-    roles.set(state.session_id, { role: 'child', plan, name, repo, status: state.status })
+    // What it is waiting on you for right now, and how far the repo is from pushing on its own.
+    const asks = pendingAsks().filter((a) => a.session === name)
+    const pushApproved = permits.repos?.[repo]?.push_approved || 0
+    roles.set(state.session_id, { role: 'child', plan, name, repo, status: state.status, asks, push_approved: pushApproved })
   }
   return roles
 }
+
+/** The newest orchestrator of a plan, by session id. */
+function orchestratorFor(store, plan) {
+  const found = Object.entries(readRegistry(store))
+    .filter(([, c]) => planKey(c.plan) === plan)
+    .sort(([, a], [, b]) => String(b.registered_at).localeCompare(String(a.registered_at)))
+  return found[0]?.[0] || null
+}
+
+// A repo session waiting for your Allow or Deny: its orchestrator hears of it and tells you
+// what it is for. You answer on the page, never the orchestrator.
+onAsk(async (ask) => {
+  const store = openStore()
+  const plan = ask.repo && ask.session.endsWith(`-${ask.repo}`) ? ask.session.slice(0, -ask.repo.length - 1) : ask.session
+  const id = orchestratorFor(store, plan)
+  if (!id) return
+  await tell(
+    { id },
+    `[shared session] ${ask.session} is waiting for my permission to run \`${ask.command}\` (${ask.reason}). I answer Allow or Deny on the page, in the Orchestrations tab. In two lines, tell me what it is for and what could go wrong. Do not answer it yourself.`
+  )
+})
 
 // ---------------------------------------------------------------------------------------------
 // Telling the orchestrator something happened
@@ -124,10 +153,8 @@ const REPORTED = new Set(['mcp__store__submit_report', 'mcp__store__ask_orchestr
 export async function reportToOrchestrator(ref, { store = openStore(), read = (r) => readMessages('claude-code', r), ...runOpts } = {}) {
   const child = shareRoles(store).get(ref?.cliSessionId)
   if (child?.role !== 'child') throw new Error('This thread is not a repo session of a shared run')
-  const orchestrators = Object.entries(readRegistry(store))
-    .filter(([, c]) => planKey(c.plan) === child.plan)
-    .sort(([, a], [, b]) => String(b.registered_at).localeCompare(String(a.registered_at)))
-  if (!orchestrators.length) throw new Error(`No orchestrator for ${child.plan}`)
+  const orchestrator = orchestratorFor(store, child.plan)
+  if (!orchestrator) throw new Error(`No orchestrator for ${child.plan}`)
   const log = await read(ref)
   if (!log.ok) throw new Error(log.error || 'Could not read the session')
   const messages = log.messages
@@ -143,10 +170,10 @@ export async function reportToOrchestrator(ref, { store = openStore(), read = (r
   const text = `[shared session] I talked to ${child.name} directly. Below is that conversation since its last report. Update your picture of the run: what changed, what was decided, what is still open, and whether it changes what any other session should do. Tell me in a few lines.
 
 ${fresh.map(line).join('\n\n')}`
-  await tell({ id: orchestrators[0][0] }, text, runOpts)
+  await tell({ id: orchestrator }, text, runOpts)
   await store.writeState(child.name, { synced_messages: messages.length, synced_at: new Date().toISOString() })
   await store.appendLog({ type: 'direct_talk_reported', session: child.name, messages: fresh.length })
-  return { sent: true, orchestrator: orchestrators[0][0], messages: fresh.length }
+  return { sent: true, orchestrator, messages: fresh.length }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -298,85 +325,134 @@ ${sessions.map((s) => `- ${s.name} (${s.repo}) on ${s.model}${s.dependsOn.length
   return run
 }
 
-/** The model that reads a plan for the preview. Reading only; repo sessions use their own. */
-export const PREVIEW_MODEL = 'claude-sonnet-5'
+/** The model that exercises a plan against the code, before any session writes a line. */
+export const EXERCISE_MODEL = DEFAULT_MODEL
 
-const SUMMARY_SCHEMA = {
+const EXERCISE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'repos'],
+  required: ['summary', 'changes', 'tests', 'risks', 'questions'],
   properties: {
     summary: { type: 'string' },
-    repos: {
+    changes: {
       type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['repo', 'changes'],
-        properties: { repo: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } } },
-      },
+      items: { type: 'object', additionalProperties: false, required: ['file', 'change'], properties: { file: { type: 'string' }, change: { type: 'string' } } },
     },
+    tests: { type: 'array', items: { type: 'string' } },
+    risks: { type: 'array', items: { type: 'string' } },
+    questions: { type: 'array', items: { type: 'string' } },
   },
 }
 
 /**
- * Sonnet reads the whole plan, whatever its layout, and says what it changes and in which repos.
- * No tools, no session kept: it only answers.
+ * Opus reads the plan against one repo's real code, in the worktree the session will use, and
+ * says exactly what changes where. Read-only: no edits, and only read-only shell commands.
  */
-export async function summarizePlan(file, { store = openStore(), query = sdkQuery } = {}) {
-  const text = await fsp.readFile(file, 'utf8')
-  const isRepo = repoChecker(store.reposDir)
-  const known = fs.existsSync(store.reposDir) ? fs.readdirSync(store.reposDir).filter(isRepo) : []
-  const prompt = `Read this implementation plan and tell the user, before anything runs, what it will change and in which repos.
-- summary: two or three plain sentences: what the change is and why.
-- repos: every repo the plan changes code or config in, in plan order. For each, its changes as short bullets (what changes, not how). Use the repo's name exactly as in this list when it is there: ${known.join(', ') || '(none)'}.
-Only what the plan says. Do not invent changes.
+export async function exerciseRepo(file, session, { store = openStore(), query = sdkQuery, run, serveCheck = canServeGraph } = {}) {
+  const [entry] = Object.values(await prepareRepos(store, [session.repo], session.name, { run }))
+  const plan = await fsp.readFile(file, 'utf8')
+  const prompt = `You are exercising an approved implementation plan against the real code, before anyone writes any. Do not edit anything.
+
+Repo: ${entry.name}. Its worktree is ${entry.worktree}, branched from ${entry.base} at ${entry.git_sha.slice(0, 8)}: this is the code the implementing session will start from.
+This repo's part of the plan: ${session.steps.join('; ')}.
+${entry.graph_path ? `A code graph of this commit: \`graphify query "<question>" --graph ${entry.graph_path}\` (also path, explain), or the graphify-${entry.name} MCP tools.` : ''}
+
+Read the plan, then the code it touches. Return:
+- summary: two or three sentences: what this repo's change is, and whether the plan fits the code as it is.
+- changes: each file to change and what changes in it, citing file:line for the code it touches.
+- tests: the test cases to add or update, by file and name.
+- risks: what could break, and where.
+- questions: wherever the code disagrees with the plan, or the plan leaves a decision open.
+Only what the plan asks for.
 
 <plan path="${file}">
-${text}
+${plan}
 </plan>`
   const options = {
-    model: PREVIEW_MODEL,
-    cwd: CONDUCTOR_HOME,
-    tools: [],
+    model: EXERCISE_MODEL,
+    cwd: entry.worktree,
+    tools: ['Read', 'Grep', 'Glob', 'Bash'],
+    mcpServers: graphServers(entry.graph_path && serveCheck(entry.graph_path) ? [entry] : []),
+    canUseTool: async (toolName, input) =>
+      toolName !== 'Bash' || bashAllowed(String(input.command || ''))
+        ? { behavior: 'allow', updatedInput: input }
+        : { behavior: 'deny', message: 'Read-only: use read-only shell commands, Read, Grep and Glob.' },
+    permissionMode: 'default',
     settingSources: [],
     persistSession: false,
-    outputFormat: { type: 'json_schema', schema: SUMMARY_SCHEMA },
+    outputFormat: { type: 'json_schema', schema: EXERCISE_SCHEMA },
     pathToClaudeCodeExecutable: (await cliBinary()) || undefined,
   }
   for await (const msg of query({ prompt, options })) {
     if (msg.type !== 'result') continue
-    if (msg.subtype !== 'success' || !msg.structured_output) throw new Error(`Could not read the plan (${msg.subtype})`)
-    return msg.structured_output
+    if (msg.subtype !== 'success' || !msg.structured_output) throw new Error(`Opus could not finish the exercise (${msg.subtype})`)
+    return { ...msg.structured_output, repo: entry.name, base: entry.base, git_sha: entry.git_sha, model: EXERCISE_MODEL, cost_usd: msg.total_cost_usd }
   }
-  throw new Error('Could not read the plan: no answer')
+  throw new Error('Opus could not finish the exercise: no answer')
+}
+
+
+/**
+ * Exercise every repo session of a plan at once. Each result is kept in the store, where the
+ * session's brief picks it up at Start; a plan that has not changed is not exercised again.
+ */
+function startExercise(file, sessions, opts) {
+  // Preview pressed again while Opus is still at it: follow the same run rather than pay twice.
+  const running = [...shared.jobs.values()].find((j) => j.file === file && !j.done)
+  if (running) return running
+  const job = { id: randomUUID(), file, repos: Object.fromEntries(sessions.map((s) => [s.repo, { status: 'queued' }])), done: false }
+  shared.jobs.set(job.id, job)
+  const text = fs.readFileSync(file, 'utf8')
+  const one = async (s) => {
+    const r = job.repos[s.repo]
+    const hash = exerciseHash(text, s.repo, s.steps)
+    const kept = readExercise(opts.store, s.name, hash)
+    if (kept) return Object.assign(r, { status: 'done', exercise: kept, reused: true })
+    try {
+      r.status = 'reading'
+      const exercise = { ...(await exerciseRepo(file, s, opts)), plan_hash: hash, at: new Date().toISOString() }
+      await fsp.mkdir(path.dirname(exerciseFile(opts.store, s.name)), { recursive: true })
+      await writeAtomic(exerciseFile(opts.store, s.name), JSON.stringify(exercise, null, 2) + '\n')
+      Object.assign(r, { status: 'done', exercise })
+    } catch (err) {
+      Object.assign(r, { status: 'failed', error: String(err?.message || err) })
+    }
+  }
+  Promise.all(sessions.map(one)).finally(() => {
+    job.done = true
+    // ponytail: finished jobs live in memory for an hour; the exercises themselves are on disk.
+    setTimeout(() => shared.jobs.delete(job.id), 3600_000).unref?.()
+  })
+  return job
 }
 
 /**
- * The preview: Sonnet's reading of the plan, beside the sessions Start would run. A repo the
- * reading names but no session covers, or the other way round, is said out loud.
+ * The preview: the sessions Start would run, and an exercise of each started in the
+ * background. The page follows it with /api/share/exercise.
  */
-async function previewPlan(plan, { store, query }) {
+async function previewPlan(plan, opts) {
   const file = expand(plan)
   if (!file.endsWith('.md')) throw new Error('A plan is a .md file')
   if (!fs.existsSync(file)) throw new Error(`No file at ${file}`)
-  const [reading, split] = await Promise.all([
-    summarizePlan(file, { store, query }),
-    checkPlan(file, {}, store).catch((err) => ({ sessions: [], warnings: [err.message] })),
-  ])
-  const warnings = [...split.warnings]
-  const has = new Set(split.sessions.map((s) => s.repo))
-  const read = new Set(reading.repos.map((r) => r.repo))
-  for (const r of read) if (!has.has(r)) warnings.push(`${r}: the plan changes it, but no step is assigned to it, so no session starts for it`)
-  for (const r of has) if (!read.has(r)) warnings.push(`${r}: a session starts for it, but the reading found no change there`)
-  return { file, summary: reading.summary, repos: reading.repos, sessions: split.sessions, warnings }
+  const { sessions, warnings } = await checkPlan(file, {}, opts.store).catch((err) => ({ sessions: [], warnings: [err.message] }))
+  await opts.store.init()
+  const job = sessions.length ? startExercise(file, sessions, opts) : null
+  return { file, sessions, warnings, job: job?.id || null, exercise: job?.repos || {} }
 }
 
-/** The page's two calls: preview a plan, and start its orchestrator. */
-export async function shareRoute(pathname, body, { store = openStore(), query = sdkQuery } = {}) {
+/** The page's calls: preview a plan, follow its exercise, start its orchestrator, and the rest. */
+export async function shareRoute(pathname, body, { store = openStore(), query = sdkQuery, run, serveCheck } = {}) {
   if (pathname === '/api/share/preview') {
-    const preview = await previewPlan(body.plan, { store, query })
+    const preview = await previewPlan(body.plan, { store, query, run, serveCheck })
     return { status: 200, json: { ...preview, models: SESSION_MODELS, home: CONDUCTOR_HOME } }
+  }
+  if (pathname === '/api/share/exercise') {
+    const job = shared.jobs.get(String(body.job || ''))
+    if (!job) return { status: 404, json: { error: 'That exercise is gone; press Preview again' } }
+    return { status: 200, json: { repos: job.repos, done: job.done } }
+  }
+  if (pathname === '/api/share/answer') {
+    return { status: 200, json: await answerPermit(store, String(body.id || ''), body.choice) }
   }
   if (pathname === '/api/share/report') {
     return { status: 200, json: await reportToOrchestrator(body.ref, { store }) }

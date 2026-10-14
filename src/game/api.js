@@ -162,6 +162,10 @@ export const chatStop = (runId) => post('/api/chat/stop', { runId })
 /** Shared sessions: what a plan.md would start, and starting its orchestrator. */
 export const sharePreview = (plan) => post('/api/share/preview', { plan })
 export const shareStart = (plan, models) => post('/api/share/start', { plan, models })
+/** How far Opus has got exercising a previewed plan, per repo. */
+export const shareExercise = (job) => post('/api/share/exercise', { job })
+/** Your Allow or Deny for something a repo session is waiting on. */
+export const shareAnswer = (id, choice) => post('/api/share/answer', { id, choice })
 /** What you said to a repo session yourself, passed on to its orchestrator. */
 export const shareReport = (ref) => post('/api/share/report', { ref })
 

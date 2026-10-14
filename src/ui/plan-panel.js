@@ -6,7 +6,7 @@
  * and reads each repo session's report back to you. Each repo session is a thread of its repo,
  * working in its own worktree, so it walks onto the map in that repo's zone.
  */
-import { sharePreview, shareStart } from '../game/api.js'
+import { shareExercise, sharePreview, shareStart } from '../game/api.js'
 import { ICON } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 
@@ -20,7 +20,7 @@ const TEMPLATE = `
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>
   <div class="plan-body">
-    <p class="plan-hint">One session per repo, each in its own worktree. A repo that depends on another starts once that one has reported. Nothing is pushed.</p>
+    <p class="plan-hint">Preview has Opus 5.5 exercise the plan against each repo's code, in a fresh worktree. Start then runs one session per repo on the model you pick, with that exercise as its brief. A repo that depends on another starts once that one has reported. Pushes, PRs and risky commands wait for your Allow.</p>
   </div>
   <div class="plan-foot">
     <span class="plan-note"></span>
@@ -55,7 +55,7 @@ export class PlanPanel {
       else if (e.key === 'Enter') this.load()
     })
     // A new path is a new plan: what was previewed no longer applies.
-    this.input.addEventListener('input', () => this.show(null))
+    this.input.addEventListener('input', () => (clearTimeout(this.polling), this.show(null)))
   }
 
   get isOpen() {
@@ -64,11 +64,14 @@ export class PlanPanel {
 
   open() {
     this.el.classList.add('open')
+    if (this.preview?.job) this.follow()
     this.input.focus()
     this.input.select()
   }
 
   close() {
+    // The exercise keeps going on the server; reopening and pressing Preview picks it up again.
+    clearTimeout(this.polling)
     this.el.classList.remove('open')
   }
 
@@ -81,55 +84,88 @@ export class PlanPanel {
   async load() {
     const plan = this.input.value.trim()
     if (!plan) return this.note('Give the path of a plan.md', true)
-    this.note('Sonnet is reading the plan…')
+    this.note('Reading the plan…')
+    clearTimeout(this.polling)
     try {
       this.show(await sharePreview(plan))
       localStorage.setItem(LAST_PLAN, plan)
-      this.note('')
+      this.follow()
     } catch (err) {
       this.show(null)
       this.note(err.message, true)
     }
   }
 
+  /** Poll the exercise until every repo is done or failed; Start waits for it. */
+  async follow() {
+    const preview = this.preview
+    if (!preview?.job) return this.note(preview?.sessions.length ? '' : 'No repo session to exercise')
+    try {
+      const { repos, done } = await shareExercise(preview.job)
+      if (this.preview !== preview) return
+      preview.exercise = repos
+      this.show(preview)
+      if (!done) {
+        const busy = Object.entries(repos).filter(([, r]) => r.status !== 'done' && r.status !== 'failed').map(([repo]) => repo)
+        this.note(`Opus is exercising the plan against the code: ${busy.join(', ')}…`)
+        this.polling = setTimeout(() => this.follow(), 2500)
+      } else {
+        const failed = Object.values(repos).filter((r) => r.status === 'failed').length
+        const cost = Object.values(repos).reduce((sum, r) => sum + (r.reused ? 0 : r.exercise?.cost_usd || 0), 0)
+        this.note(`${failed ? `${failed} exercise${failed === 1 ? '' : 's'} failed; those sessions start from the plan alone. ` : 'Exercised. '}${cost ? `Opus cost $${cost.toFixed(2)}.` : ''}`, Boolean(failed))
+      }
+    } catch (err) {
+      if (this.preview === preview) this.note(err.message, true)
+    }
+  }
+
   /**
-   * What the plan changes, as Sonnet read it, one row per repo; a repo that gets a session has
-   * its model picker. Or the hint when there is no preview.
+   * One row per repo session: its exercise as it comes in (what changes where, tests, open
+   * questions), and the model it implements on. Or the hint when there is no preview.
    */
   show(preview) {
     this.preview = preview
-    this.$('[data-start]').disabled = !preview?.sessions.length
+    const exercising = Object.values(preview?.exercise || {}).some((r) => r.status !== 'done' && r.status !== 'failed')
+    this.$('[data-start]').disabled = !preview?.sessions.length || exercising
     const body = this.$('.plan-body')
     if (!preview) {
       body.replaceChildren(this.$('.plan-hint') || el('p', 'plan-hint'))
       return
     }
-    const sessions = new Map(preview.sessions.map((s) => [s.repo, s]))
-    const changes = new Map(preview.repos.map((r) => [r.repo, r.changes]))
-    const rows = [...new Set([...changes.keys(), ...sessions.keys()])].map((repo) => {
-      const s = sessions.get(repo)
+    const picked = Object.fromEntries([...this.el.querySelectorAll('.plan-row select')].map((s) => [s.dataset.repo, s.value]))
+    const rows = preview.sessions.map((s) => {
+      const ex = preview.exercise?.[s.repo] || {}
       const row = el('div', 'plan-row')
       const info = el('div', 'info')
-      info.append(el('div', 'title', repo), el('div', 'sub', s ? `${s.steps.length} step${s.steps.length === 1 ? '' : 's'}${s.dependsOn.length ? ` · after ${s.dependsOn.join(', ')}` : ''}` : 'no session'))
-      const list = el('ul', 'plan-steps')
-      for (const t of changes.get(repo) || s.steps) list.append(el('li', '', t.replace(/`/g, '')))
-      info.append(list)
-      row.append(info)
-      if (s) {
-        const pick = el('select', 'select')
-        pick.dataset.repo = repo
-        pick.setAttribute('aria-label', `Model for ${repo}`)
-        for (const m of preview.models) pick.append(new Option(m.label, m.id, false, m.id === s.model))
-        row.append(pick)
+      const state = { queued: 'waiting to start', reading: 'Opus is reading the code…', done: ex.reused ? 'exercised (kept from last time)' : 'exercised', failed: `exercise failed: ${ex.error || ''}` }[ex.status] || ''
+      info.append(el('div', 'title', s.repo), el('div', 'sub', `${s.steps.length} item${s.steps.length === 1 ? '' : 's'}${s.dependsOn.length ? ` · after ${s.dependsOn.join(', ')}` : ''}${state ? ` · ${state}` : ''}`))
+      const e = ex.exercise
+      if (e) {
+        const summary = el('div', 'plan-summary')
+        summary.append(renderMarkdown(e.summary))
+        const list = el('ul', 'plan-steps')
+        for (const c of e.changes) list.append(el('li', '', `${c.file}: ${c.change}`))
+        info.append(summary, list)
+        if (e.tests.length) info.append(el('div', 'plan-sub', `Tests: ${e.tests.join(' · ')}`))
+        for (const q of e.questions) info.append(el('div', 'plan-warn', `? ${q}`))
+        for (const r of e.risks) info.append(el('div', 'plan-risk', `Risk: ${r}`))
+      } else {
+        const list = el('ul', 'plan-steps')
+        for (const t of s.steps) list.append(el('li', '', t.replace(/`/g, '')))
+        info.append(list)
       }
+      const pick = el('select', 'select')
+      pick.dataset.repo = s.repo
+      pick.setAttribute('aria-label', `Model ${s.repo} implements on`)
+      pick.title = 'The model that implements this repo'
+      for (const m of preview.models) pick.append(new Option(m.label, m.id, false, m.id === (picked[s.repo] || s.model)))
+      row.append(info, pick)
       return row
     })
     const head = el('div', 'plan-file', preview.file)
-    const summary = el('div', 'plan-summary')
-    summary.append(renderMarkdown(preview.summary))
     const warn = preview.warnings.map((w) => el('div', 'plan-warn', w.replace(/^! /, '')))
-    const where = el('p', 'plan-hint', `The orchestrator opens as a chat in ${preview.home}.`)
-    body.replaceChildren(head, summary, ...warn, ...rows, where)
+    const where = el('p', 'plan-hint', `Opus 5.5 exercises each repo; the sessions implement on the model picked. Pushes, PRs and risky commands wait for your Allow. The orchestrator opens as a chat in ${preview.home}.`)
+    body.replaceChildren(head, ...warn, ...rows, where)
   }
 
   async start() {

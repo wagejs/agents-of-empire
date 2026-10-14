@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
+import { classify, requestPermit } from './permit.mjs'
 import { CONFIDENCES, checkCodeRef, renderFrontMatter, writeAtomic } from './store.mjs'
 
 /** Statuses after which a session may stop. */
@@ -190,7 +191,7 @@ const ALLOW = { allow: true }
  * Whether a session may make this tool call. `writable` is the session folder plus its
  * worktrees. Pure, so the PreToolUse hook and canUseTool give the same answer.
  */
-export function guard(store, name, writable, toolName, input = {}, cwd = '') {
+export function guard(store, name, writable, toolName, input = {}, cwd = '', { push = false } = {}) {
   const root = store.paths.root
   const own = store.sessionDir(name)
   if (WRITE_TOOLS.has(toolName)) {
@@ -214,32 +215,38 @@ export function guard(store, name, writable, toolName, input = {}, cwd = '') {
     }
     if (/graphify-out/.test(cmd) && SHELL_WRITES.test(cmd)) return deny('graphify-out/ is read-only for sessions')
     if ((cmd.includes(root) || /(^|[\s'"/])\.store\b/.test(cmd)) && SHELL_WRITES.test(cmd)) return deny('Write to the store through submit_report, ask_orchestrator or the Write tool in your own folder')
-    if (/\bgit\s+push\b/.test(cmd)) return deny('Sessions do not push; report the branch instead')
+    if (/\bgit\s+rebase\b/.test(cmd) || /\bgit\s+push\b.*(\s--force\b|\s--force-with-lease\b|\s-f\b|\s\+\S)/.test(cmd)) return deny('Never rebase or force-push; merge main in and push fast-forward')
+    // An implementing session's push waits for you at the gate; nobody else pushes at all.
+    if (!push && /\bgit\s+push\b/.test(cmd)) return deny('Sessions do not push; report the branch instead')
     return ALLOW
   }
   return ALLOW
 }
 
-/** canUseTool for a session: what would otherwise ask a person is answered by the guard and a short Bash allowlist. */
-export function sessionPermissions(store, name, writable, { bash } = {}) {
+/**
+ * canUseTool for a session. A researching one gets the guard and a short read-only Bash list.
+ * An implementing one (`gate`: its repo and your ask rules) runs allow-all after the guard,
+ * except what `classify` says waits for you: that call is held until you answer on the page.
+ */
+export function sessionPermissions(store, name, writable, { gate } = {}) {
   return async (toolName, input) => {
-    const verdict = guard(store, name, writable, toolName, input)
+    const verdict = guard(store, name, writable, toolName, input, '', { push: Boolean(gate) })
     if (!verdict.allow) return { behavior: 'deny', message: verdict.reason }
-    if (toolName === 'Bash' && !bashAllowed(String(input.command || ''), bash)) {
-      return { behavior: 'deny', message: `Not on the session Bash allowlist (${bash ? 'read-only commands, builds, tests, git add/commit' : 'read-only commands and graphify query/path/explain'}). Report what you need instead.` }
+    if (gate) {
+      const held = classify(toolName, input, gate.rules)
+      if (!held) return { behavior: 'allow', updatedInput: input }
+      const choice = await requestPermit(store, { session: name, repo: gate.repo, toolName, input, ...held })
+      await store.appendLog({ type: 'permit', session: name, tool: toolName, kind: held.kind, choice })
+      return choice === 'allow'
+        ? { behavior: 'allow', updatedInput: input }
+        : { behavior: 'deny', message: 'The user denied this. Do not try another way round it; say what you needed in open_questions.' }
+    }
+    if (toolName === 'Bash' && !bashAllowed(String(input.command || ''))) {
+      return { behavior: 'deny', message: 'Not on the session Bash allowlist (read-only commands and graphify query/path/explain). Report what you need instead.' }
     }
     return { behavior: 'allow', updatedInput: input }
   }
 }
-
-/**
- * What an implementing session may also run: builds, tests, formatters, and committing on its
- * own branch. Pushing stays denied by the guard.
- * ponytail: `npm run x`, `make build` and `go generate` run whatever the repo defines; trusted
- * because the repo is yours. Tighten per repo if a session ever abuses it.
- */
-export const IMPLEMENT_BASH =
-  /^\s*(git\s+(-C\s+\S+\s+)?(add|commit|restore|stash|checkout\s+--)\b|go\s+(build|test|vet|fmt|generate|mod\s+(tidy|download))\b|gofmt\b|goimports\b|golangci-lint\b|npm\s+(test|ci|install|run\s+[\w:-]+)\b|npx\s+(jest|vitest|eslint|tsc|prettier|playwright)\b|yarn\s+(test|lint|install|build)\b|pnpm\s+(test|lint|install|run|build)\b|make\s+(test|build|lint|mocks|swagger)\b|node\s+--test\b|php\s+(artisan\s+test|vendor\/bin\/phpunit)\b|composer\s+(install|test|dump-autoload)\b|vendor\/bin\/phpunit\b|mockery\b|swag\b)/
 
 /**
  * A command chain is allowed when every part is: `cd <dir>` (the guard already checked
@@ -253,11 +260,15 @@ export function bashAllowed(cmd, extra) {
 const STORE_WRITE_TOOLS = /^mcp__store__(submit_report|ask_orchestrator)$/
 
 /** PreToolUse, PostToolUse and Stop for one session. */
-export function sessionHooks(store, name, writable, ctx = { readFiles: new Set() }) {
+export function sessionHooks(store, name, writable, ctx = { readFiles: new Set() }, { gate } = {}) {
   const preToolUse = async (input) => {
-    let verdict = guard(store, name, writable, input.tool_name, input.tool_input || {}, input.cwd)
+    let verdict = guard(store, name, writable, input.tool_name, input.tool_input || {}, input.cwd, { push: Boolean(gate) })
     // A subagent hands its result to its session; only the session reports to the store.
     if (verdict.allow && input.agent_id && STORE_WRITE_TOOLS.test(input.tool_name)) verdict = deny('Subagents return results to their session; the session reports')
+    // What waits for you goes to the permission prompt even when a settings rule would allow
+    // it (a repo allowing `git push *`, say): canUseTool is where it waits.
+    const held = verdict.allow && gate && classify(input.tool_name, input.tool_input || {}, gate.rules)
+    if (held) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `Waits for the user: ${held.reason}` } }
     if (verdict.allow) return {}
     await store.appendLog({ type: 'denied', session: name, tool: input.tool_name, reason: verdict.reason })
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason } }

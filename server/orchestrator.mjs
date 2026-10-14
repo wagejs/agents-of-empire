@@ -16,7 +16,8 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
 import { cliBinary } from './harnesses/claude-code.mjs'
-import { canServeGraph, graphServers, IMPLEMENT_BASH, sessionHooks, sessionPermissions, storeServer } from './session-tools.mjs'
+import { askRules, dropAsks } from './permit.mjs'
+import { canServeGraph, graphServers, sessionHooks, sessionPermissions, storeServer } from './session-tools.mjs'
 import { assertSessionName, openStore, parseFrontMatter } from './store.mjs'
 
 const exec = promisify(execFile)
@@ -58,11 +59,29 @@ async function addWorktrees(store, repos, name) {
     const repo_path = store.repoPath(repo)
     const worktree = worktreePath(repo_path, name)
     const base = await remoteBase(repo_path)
-    if (!fs.existsSync(worktree)) await git(repo_path, 'worktree', 'add', '--no-track', '-b', branchOf(name), worktree, base.sha)
+    if (!fs.existsSync(worktree)) {
+      await git(repo_path, 'worktree', 'add', '--no-track', '-b', branchOf(name), worktree, base.sha)
+      // The repo's own local permission rules are not committed, so a fresh worktree lacks
+      // them: carried over, the session runs under the same allow and deny as the repo.
+      const local = path.join(repo_path, '.claude', 'settings.local.json')
+      if (fs.existsSync(local)) {
+        await fsp.mkdir(path.join(worktree, '.claude'), { recursive: true })
+        await fsp.copyFile(local, path.join(worktree, '.claude', 'settings.local.json'))
+      }
+    }
     const git_sha = await git(worktree, 'merge-base', 'HEAD', base.sha)
     out.push({ name: path.basename(repo_path), repo_path, worktree, branch: branchOf(name), base: base.ref, git_sha })
   }
   return out
+}
+
+/**
+ * A session's worktrees, fresh from the remote base, each with its graph brought up to that
+ * commit. Run before a session starts, and by the plan preview so Opus reads the same code the
+ * session will work on; a worktree already there is reused.
+ */
+export async function prepareRepos(store, repos, name, { run } = {}) {
+  return store.refreshGraphs(await addWorktrees(store, repos, name), run ? { run } : {})
 }
 
 /**
@@ -133,12 +152,15 @@ async function sessionOptions(store, name, repos, mode, extra = {}) {
   const worktrees = repos.map((r) => r.worktree)
   const writable = [dir, ...worktrees]
   const ctx = { readFiles: new Set() }
+  // Implementing: allow-all in the worktree, with pushes, risky commands and your ask rules
+  // waiting for you. Researching: the read-only allowlist.
+  const gate = mode === 'implement' ? { repo: repos[0]?.name, rules: askRules(repos.map((r) => r.repo_path)) } : null
   return {
     cwd: worktrees[0] || dir,
     additionalDirectories: worktrees.length ? [dir, ...worktrees.slice(1)] : [],
     mcpServers: { store: storeServer(store, name, ctx), ...graphServers(repos) },
-    hooks: sessionHooks(store, name, writable, ctx),
-    canUseTool: sessionPermissions(store, name, writable, { bash: mode === 'implement' ? IMPLEMENT_BASH : null }),
+    hooks: sessionHooks(store, name, writable, ctx, { gate }),
+    canUseTool: sessionPermissions(store, name, writable, { gate }),
     permissionMode: 'default',
     // Your own skills and settings load, as in a terminal; the hooks above still apply.
     settingSources: ['user', 'project', 'local'],
@@ -163,6 +185,8 @@ async function drive(store, name, prompt, options, query) {
   } catch (err) {
     await store.appendLog({ type: 'session_error', session: name, error: String(err?.message || err) })
   }
+  // Anything still waiting for you has nothing left to let through.
+  dropAsks(name)
   const state = await store.readState(name)
   // Ended without a report or a question, and the Stop hook did not already give up on it.
   if (state.status === 'running') return store.writeState(name, { status: 'failed' })
@@ -180,7 +204,7 @@ export async function startSession(
 ) {
   assertSessionName(name)
   await store.init()
-  const entries = await store.refreshGraphs(await addWorktrees(store, repos, name), run ? { run } : {})
+  const entries = await prepareRepos(store, repos, name, { run })
   const withWorktrees = Object.values(entries).map((r) => ({ ...r, graph_mcp: Boolean(r.graph_path) && serveCheck(r.graph_path) }))
   for (const r of withWorktrees) {
     if (r.graph_path && !r.graph_mcp) await store.appendLog({ type: 'graph_mcp_unavailable', session: name, repo: r.name })
