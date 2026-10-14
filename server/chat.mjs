@@ -394,7 +394,7 @@ async function drive(run, target, text, query) {
   }
   run.abort.signal.addEventListener('abort', stop, { once: true })
 
-  const canUseTool = (name, input, { signal: toolSignal, suggestions }) =>
+  const canUseTool = (name, input, { signal: toolSignal, suggestions, decisionReason, defaultToNo }) =>
     new Promise((resolve) => {
       const id = randomUUID()
       const always = alwaysRule(suggestions)
@@ -441,6 +441,17 @@ async function drive(run, target, text, query) {
         write({ type: 'question', id, questions })
         return
       }
+      // The mode you picked, held to here as well. Claude Code can still ask under Allow all
+      // (its own safety checks, a subagent, a rule that asks), and an ask then would stall a
+      // loop meant to run unattended. So the page answers as the mode says, and leaves a note.
+      // Not for an ask Claude Code marks as one never to approve on reflex.
+      const settled = defaultToNo ? '' : settledBy(run.mode, name)
+      if (settled) {
+        run.pending.delete(id)
+        const summary = toolSummary(name, input)
+        write({ type: 'note', text: `${settled === 'allow' ? 'Allowed' : 'Denied'} by mode (${run.mode}): ${name} · ${summary}`.slice(0, 300) })
+        return resolve(settled === 'allow' ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: denial(name) })
+      }
       pending.set(id, {
         run,
         name,
@@ -458,6 +469,8 @@ async function drive(run, target, text, query) {
         summary: toolSummary(name, input),
         input: JSON.stringify(input, null, 2).slice(0, 4096),
         always: always.label,
+        // Why Claude Code asked at all, in its own words, for when the answer is surprising.
+        reason: typeof decisionReason === 'string' ? decisionReason.slice(0, 300) : '',
       })
     })
 

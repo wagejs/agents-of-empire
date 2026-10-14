@@ -2590,6 +2590,29 @@ kbd {
   white-space: pre-wrap;
 }
 
+/* Fresh loop: one button per all-day skill, under the stats. */
+.side .loops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+.side .loops-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.side .loops .btn {
+  height: 26px;
+  font-size: 12px;
+  padding: 0 9px;
+}
+
 /* Starting a shared run: under Fresh loop, above the Repos / Orchestrations tabs it fills. */
 .side .plan-bar {
   padding: 0 14px 10px;
@@ -2605,6 +2628,22 @@ kbd {
 .side .plan-bar svg {
   width: 16px;
   height: 16px;
+}
+
+/* A markdown file Claude wrote or named: click to read it beside the chat. */
+.chat .md-file {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.chat .tool.md-file::after {
+  content: '  ↗ open';
+  color: var(--accent);
+}
+
+.chat .md-file:hover {
+  color: var(--accent);
 }
 
 .plan-sub {
@@ -2656,4 +2695,23 @@ kbd {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
+}
+
+/* Quote: floats over a selection in the chat or the panel beside it. */
+.chat .quote-btn {
+  position: absolute;
+  z-index: 6;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.chat .quote-btn[hidden] {
+  display: none;
 }

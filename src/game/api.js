@@ -141,6 +141,12 @@ export const chatStart = (folder, text, mode, model) => post('/api/chat/new', { 
 export const chatCommands = ({ thread, folder }) =>
   post('/api/chat/commands', thread ? { harness: thread.harness, ref: thread.ref } : { folder })
 
+/** A markdown file a chat named, to show beside the chat: `{ path, text }`. */
+export const chatFile = (path, cwd) => post('/api/chat/file', { path, cwd })
+
+/** Stop the session running a loop skill and start the skill afresh in a new one. */
+export const chatFreshLoop = (skill, oldSessionId) => post('/api/chat/loop', { skill, oldSessionId })
+
 /** Switch a running reply's model. */
 /** What the chat's link panel shows for a link: a GitHub PR or issue, a framable page, or neither. */
 export const chatLink = (url) => post('/api/chat/link', { url })

@@ -849,3 +849,15 @@ test('a terminal thread whose last word is a reply asks for you, with no process
   assert.equal(busy.unread, false, 'stopped mid tool call is not a question to you')
   await fsp.rm(working.root, { recursive: true, force: true })
 })
+
+test('bookkeeping written after a reply does not make the reply look newer than it is', async () => {
+  const at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() // replied two hours ago
+  const replied = { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: 'final report' }], stop_reason: 'end_turn' } }
+  // What Claude Code appends when a session is reopened: no timestamps, no new reply.
+  const reopened = [{ type: 'last-prompt', lastPrompt: 'show me the final report' }, { type: 'mode', mode: 'default' }]
+  const fixture = await fakeClaude({ transcript: [typed('report'), replied, ...reopened] })
+  const [thread] = await (await claudeWith(fixture)).scanThreads()
+  assert.equal(thread.unread, true, 'still a reply waiting for you')
+  assert.equal(thread.lastActivityAt, Date.parse(at), 'its activity is the reply, not the file being touched since')
+  await fsp.rm(fixture.root, { recursive: true, force: true })
+})

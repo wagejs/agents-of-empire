@@ -9,7 +9,7 @@
  * and opening its thread again picks it up with everything it said in the meantime. Only Stop
  * ends one early. Which chat was open is remembered for the tab, so a reload brings it back.
  */
-import { chatAttach, chatCommands, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
+import { chatAttach, chatCommands, chatFile, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
 import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { LinkPanel } from './link-panel.js'
@@ -58,10 +58,29 @@ const div = (className, text) => {
   return el
 }
 
+/** A path to a markdown file, as Claude writes one: `docs/plan.md`, `~/notes.md`, `/abs/x.md`. */
+const MD_PATH = /^[~./\w@-][^\s`'"<>]*\.(md|markdown)$/i
+
+/**
+ * Make every markdown path in `el` that Claude wrote as inline code open beside the chat. Code
+ * blocks are left alone: a path in the middle of a script is not an invitation to read it.
+ */
+function markMdPaths(el) {
+  for (const code of el.querySelectorAll('code')) {
+    if (code.closest('pre')) continue
+    const text = code.textContent.trim()
+    if (!MD_PATH.test(text)) continue
+    code.dataset.md = text
+    code.classList.add('md-file')
+    code.title = 'Open beside the chat'
+  }
+  return el
+}
+
 const markdown = (text) => {
   const el = div('md')
   el.append(renderMarkdown(text))
-  return el
+  return markMdPaths(el)
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -73,6 +92,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 function toolLine(name, summary) {
   const el = div('tool', `${name} · ${summary}`)
+  // A markdown file Claude wrote, edited or read opens beside the chat instead.
+  if (/^(Write|Edit|MultiEdit|Read)$/.test(name) && MD_PATH.test(String(summary).trim())) {
+    el.dataset.md = String(summary).trim()
+    el.classList.add('md-file')
+    el.title = 'Open beside the chat'
+    return el
+  }
   el.title = 'Click to show the whole command'
   el.addEventListener('click', () => {
     if (getSelection()?.toString()) return
@@ -182,6 +208,13 @@ export class Chat {
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
     this.log = this.$('.chat-log')
+    // A markdown file Claude wrote or named opens beside the chat, rendered.
+    this.log.addEventListener('click', (e) => {
+      const file = e.target.closest?.('[data-md]')
+      if (!file || getSelection()?.toString()) return
+      e.preventDefault()
+      this.openFile(file.dataset.md)
+    })
     // A link Claude gives, a PR say, opens in a panel beside the chat rather than a tab.
     this.log.addEventListener('click', (e) => {
       const link = e.target.closest?.('a[href^="http"]')
@@ -201,6 +234,7 @@ export class Chat {
 
     this.sheet = this.$('.sheet')
     this.linkPanel = new LinkPanel(this.el)
+    this.wireQuote()
     // The panel is the chat's size, whatever you have dragged the chat to.
     new ResizeObserver(() => {
       this.linkPanel.el.style.width = `${this.sheet.offsetWidth}px`
@@ -397,6 +431,13 @@ export class Chat {
     return this.models[this.sizeKey] || ''
   }
 
+  /** A thread that takes over from another keeps the permission mode it was started in. */
+  carryMode(fromId, toId, mode) {
+    if (!toId) return
+    this.modes[toId] = mode || (fromId && this.modes[fromId]) || 'default'
+    saveModes(this.modes)
+  }
+
   /** Remember the model for this thread, and switch a reply that is running to it now. */
   async pickModel(model) {
     if (!this.sizeKey) return
@@ -450,6 +491,75 @@ export class Chat {
         return row
       })
     )
+  }
+
+  /**
+   * Quote: select text in a reply, or in whatever is open beside the chat (a plan, a markdown
+   * file, a PR), and a Quote button appears by it. It puts the selection into the message box
+   * as a markdown quote with the cursor under it, so a question can point at exactly that part.
+   * Quote several bits and they stack up in the one message.
+   */
+  wireQuote() {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'btn quote-btn'
+    button.textContent = '❝ Quote'
+    button.hidden = true
+    this.el.append(button)
+    const quotable = (node) => {
+      const el = node?.nodeType === 1 ? node : node?.parentElement
+      return el?.closest?.('.chat-log, .link-body') || null
+    }
+    const place = () => {
+      const sel = getSelection()
+      const text = sel?.toString().trim()
+      if (!text || !sel.rangeCount || !quotable(sel.anchorNode) || !quotable(sel.focusNode)) return (button.hidden = true)
+      const rect = sel.getRangeAt(0).getBoundingClientRect()
+      const host = this.el.getBoundingClientRect()
+      button.hidden = false
+      button.style.left = `${Math.max(8, rect.right - host.left - button.offsetWidth)}px`
+      button.style.top = `${Math.max(8, rect.top - host.top - button.offsetHeight - 6)}px`
+      button.quote = text
+    }
+    this.el.addEventListener('mouseup', () => setTimeout(place, 0))
+    this.el.addEventListener('keyup', (e) => e.shiftKey && place())
+    document.addEventListener('selectionchange', () => {
+      if (!getSelection()?.toString().trim()) button.hidden = true
+    })
+    // Pressed before the selection goes: keep it, so the click still has something to quote.
+    button.addEventListener('mousedown', (e) => e.preventDefault())
+    button.addEventListener('click', () => {
+      if (button.quote) this.quote(button.quote)
+      button.hidden = true
+      getSelection()?.removeAllRanges()
+    })
+  }
+
+  /** Add `text` to the message box as a markdown quote and leave the cursor ready under it. */
+  quote(text) {
+    const quoted = text
+      .replace(/\n{3,}/g, '\n\n')
+      .split('\n')
+      .map((line) => (line.trim() ? `> ${line}` : '>'))
+      .join('\n')
+    const before = this.input.value.replace(/\s+$/, '')
+    this.input.value = `${before ? `${before}\n\n` : ''}${quoted}\n\n`
+    this.input.focus()
+    this.input.setSelectionRange(this.input.value.length, this.input.value.length)
+    this.input.dispatchEvent(new Event('input'))
+  }
+
+  /** Show a markdown file from this chat beside it: read fresh, so an edit since shows too. */
+  async openFile(file) {
+    const cwd = this.thread?.ref?.cwd || this.thread?.cwd || this.folder || ''
+    try {
+      const doc = await chatFile(file, cwd)
+      // HTML comments are notes for whoever edits the file, not for reading it.
+      const text = doc.text.replace(/<!--[\s\S]*?-->\s*/g, '')
+      this.linkPanel.showDoc({ title: doc.path.split('/').pop(), sub: doc.path, markdown: text, key: `file:${doc.path}` })
+    } catch (err) {
+      this.note(err.message, true)
+    }
   }
 
   /** A rename made while this thread's chat is up shows in its header at once. */
@@ -702,6 +812,15 @@ export class Chat {
       seen++
       if (event.type === 'done') finished = true
       if (event.type === 'next') next = event.runId
+      if (event.type === 'queued') {
+        // What you typed goes under everything so far, and what Claude does next goes under
+        // that: without a fresh block the rest of the run kept filling the one above your
+        // message, and the chat looked stuck on it.
+        if (!reply.childElementCount) reply.remove()
+        this.onEvent(event, reply)
+        reply = this.add('assistant')
+        return
+      }
       if (event.type !== 'session') return this.onEvent(event, reply)
       current = { ...event.thread, title: prompt.split('\n')[0].slice(0, 120) }
       if (this.view !== view) return
@@ -742,7 +861,7 @@ export class Chat {
     this.view = null
     this.runId = null
     // An approval nobody gave died with the run; its buttons would only answer into the void.
-    for (const card of reply.querySelectorAll('.perm:not(.answered)')) card.settle(null)
+    for (const card of this.log.querySelectorAll('.perm:not(.answered)')) card.settle(null)
     if (!reply.childElementCount) reply.remove()
     // The queue went on as the next turn: watch that, under the messages that started it.
     if (next) {
@@ -778,7 +897,8 @@ export class Chat {
     else if (event.type === 'permission') reply.append(this.permission(event))
     else if (event.type === 'question') reply.append(this.question(event))
     else if (event.type === 'plan') reply.append(this.planCard(event))
-    else if (event.type === 'answered') [...reply.querySelectorAll('.perm')].find((c) => c.dataset.id === event.id)?.settle(event.choice, event.answers ?? event.feedback)
+    // Looked for across the whole chat: the card may sit in a block above a message you sent.
+    else if (event.type === 'answered') [...this.log.querySelectorAll('.perm')].find((c) => c.dataset.id === event.id)?.settle(event.choice, event.answers ?? event.feedback)
     else if (event.type === 'done' && !event.ok) reply.append(div('err', event.error || 'Something went wrong'))
     if (following) this.scroll()
   }
@@ -796,6 +916,7 @@ export class Chat {
       live.queued = false
       const following = this.atBottom()
       live.el.replaceChildren(renderMarkdown(live.text))
+      markMdPaths(live.el)
       if (following) this.scroll()
     })
   }
@@ -999,12 +1120,14 @@ export class Chat {
    * `settle` closes the card: from a click here, from an answer recorded on the server (given
    * in another tab, or before a reload), or with `null` when the run ended first.
    */
-  permission({ id, name, input, always }) {
+  permission({ id, name, input, always, reason }) {
     const card = div('perm')
     card.dataset.id = id
     const question = div('perm-q', `Allow ${name}?`)
+    // Why Claude Code asked, when it says: the clue when a mode should have let it through.
+    if (reason) question.title = reason
     const detail = document.createElement('pre')
-    detail.textContent = input
+    detail.textContent = reason ? `Asked because: ${reason}\n\n${input}` : input
     const buttons = div('pair')
     const done = { allow: `Allowed ${name}`, always: `Always allowed ${always}`, deny: `Denied ${name}` }
     card.settle = (choice) => {

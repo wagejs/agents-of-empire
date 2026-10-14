@@ -445,3 +445,62 @@ test('a plan waits for you: approved into the mode you pick, or sent back with w
   assert.equal(run.mode, 'acceptEdits')
   assert.deepEqual(modes, ['bypassPermissions', 'acceptEdits'])
 })
+
+test('under Allow all an ask Claude Code still raises is answered by the mode; Ask leaves it with you', async () => {
+  const outcomes = []
+  const query = ({ options }) => {
+    const stream = (async function* () {
+      const ask = (extra = {}) => options.canUseTool('Bash', { command: 'gh api repos/x' }, { signal: new AbortController().signal, ...extra })
+      outcomes.push((await ask()).behavior)
+      // Marked never to approve on reflex: still yours, whatever the mode.
+      const risky = ask({ defaultToNo: true })
+      outcomes.push('asked')
+      outcomes.push((await risky).behavior)
+      yield { type: 'result', is_error: false, total_cost_usd: 0 }
+    })()
+    stream.setPermissionMode = async () => {}
+    return stream
+  }
+  const run = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID, mode: 'bypassPermissions' }, 'go', { query })
+  await until(() => run.pending.size === 1)
+  assert.deepEqual(outcomes, ['allow', 'asked'])
+  assert.ok(run.events.some((e) => e.type === 'note' && /Allowed by mode/.test(e.text)))
+  answerPermission([...run.pending][0], 'deny')
+  await until(() => run.done)
+  assert.deepEqual(outcomes, ['allow', 'asked', 'deny'])
+})
+
+test('a fresh loop stops the old session, starts the skill anew, and tells it what it replaces', async () => {
+  const { freshLoop, handoff } = await import('../server/loops.mjs')
+  // The old session: running until stopped.
+  const old = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID }, '/pr-watch start', {
+    query: ({ options }) =>
+      (async function* () {
+        await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve))
+      })(),
+  })
+  const seen = []
+  const NEW_ID = '11111111-2222-4333-8444-555555555555'
+  const start = (cwd, text, mode) =>
+    startRun({ sessionId: '', cwd, mode }, text, {
+      query: ({ prompt, options }) =>
+        (async function* () {
+          const messages = prompt[Symbol.asyncIterator]()
+          seen.push({ text: (await messages.next()).value.message.content, mode: options.permissionMode })
+          yield { type: 'system', subtype: 'init', session_id: NEW_ID }
+          seen.push({ text: (await messages.next()).value.message.content })
+          yield { type: 'result', is_error: false, total_cost_usd: 0 }
+        })(),
+    })
+  // Whatever the old one ran in, a loop starts in Allow all.
+  const fresh = await freshLoop({ skill: 'pr-watch', oldSessionId: SESSION_ID }, { start })
+  assert.equal(fresh.mode, 'bypassPermissions')
+  assert.equal(old.done, true, 'the old session was stopped first')
+  assert.equal(fresh.thread.title, 'pr-watch')
+  assert.equal(fresh.thread.ref.cliSessionId, NEW_ID)
+  await until(() => seen.length === 2)
+  assert.deepEqual(seen[0], { text: '/pr-watch start', mode: 'bypassPermissions' })
+  assert.match(seen[1].text, new RegExp(`replaces an earlier /pr-watch session \\(${SESSION_ID}\\)`))
+  assert.match(handoff('review-queue', '', ''), /carries over/)
+  await assert.rejects(freshLoop({ skill: 'rm -rf' }, { start }), /Not a loop skill/)
+})

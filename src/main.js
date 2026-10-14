@@ -29,6 +29,7 @@ import {
   newSession,
   renameThread,
   revealFolder,
+  chatFreshLoop,
   shareAnswer,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
@@ -323,6 +324,32 @@ const actions = {
   // Archiving is the colony's own bookkeeping and nothing else: the thread leaves the map and
   // the astronaut walks back to the ship. The harness's own records are never touched — see
   // `reconcileArchived` in server/api.mjs for why that stopped being worth doing.
+  /**
+   * A fresh session for a loop skill: the one running it now is stopped and archived, and the
+   * skill starts again in a new session that picks up its state from disk. It runs in Allow all,
+   * so a tick reads and pulls PRs without waiting on you; its questions to you still wait.
+   */
+  freshLoop: async (skill) => {
+    const old = threads
+      .filter((t) => t.title === skill && !t.archived && t.canChat)
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0]
+    const busy = old && (old.running || old.chat === 'running' || old.chat === 'approval')
+    const ask = old
+      ? `Start a fresh /${skill} session?\n\nThe current one is stopped and archived${busy ? '. It is in the middle of something right now, and that work stops with it' : ''}. The skill's state, drafts and notes carry over.`
+      : `Start /${skill} in a new session?`
+    if (!confirm(`${ask}\n\nIt runs in Allow all: tools run without asking. The skill's own questions still come to you.`)) return
+    hud.toast(`Starting a fresh ${skill} session…`)
+    try {
+      const { thread, mode } = await chatFreshLoop(skill, old?.ref?.cliSessionId || '')
+      if (old) setArchived([old.id], true)
+      chat.carryMode?.(old?.id, thread.id, mode)
+      await poll()
+      chat.open(threads.find((t) => t.id === thread.id) || thread)
+    } catch (err) {
+      hud.toast(`Could not start ${skill}: ${err.message}`)
+    }
+  },
+
   archiveThread: () => {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread || thread.parentId) return

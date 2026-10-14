@@ -494,6 +494,16 @@ export class Hud {
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-follow', 'click', () => this.settings.set('followSelected', !this.settings.get('followSelected')))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
+    for (const b of this.el.querySelectorAll('[data-loop]')) {
+      b.addEventListener('click', async () => {
+        b.disabled = true
+        try {
+          await this.actions.freshLoop?.(b.dataset.loop)
+        } finally {
+          b.disabled = false
+        }
+      })
+    }
     on('#btn-reveal', 'click', () => this.actions.revealProject?.())
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
     on('#btn-hide-project', 'click', () => this.actions.hideProject?.())
@@ -1247,6 +1257,12 @@ const TEMPLATE = `
   </header>
 
   <div class="stats"></div>
+
+  <div class="loops" title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
+    <span class="loops-label">Fresh loop</span>
+    <button type="button" class="btn" data-loop="pr-watch">↻ pr-watch</button>
+    <button type="button" class="btn" data-loop="review-queue">↻ review-queue</button>
+  </div>
 
   <div class="plan-bar">
     <button type="button" class="btn primary" id="btn-plan" title="Preview a plan.md, then start its orchestrator and one session per repo">${ICON.plan}<span>Run a plan</span></button>

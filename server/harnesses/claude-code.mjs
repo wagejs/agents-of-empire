@@ -271,7 +271,9 @@ async function awaitingReply(file) {
     if (r.type !== 'assistant') continue
     const content = r.message?.content
     const calling = Array.isArray(content) && content.some((c) => c?.type === 'tool_use')
-    return !calling && r.message?.stop_reason !== 'tool_use'
+    if (calling || r.message?.stop_reason === 'tool_use') return false
+    // When the reply was given, for the caller that needs it; `true` from a record with no time.
+    return Date.parse(r.timestamp) || true
   }
   return false
 }
@@ -651,14 +653,19 @@ async function scanThreads() {
     // closed, and either way the answer is still waiting for you. Opening it in the page marks it
     // seen (`viewedAt`), which is what puts the hand down.
     // ponytail: a day's window, so a fresh install does not raise a hand over every old thread.
-    if (waiting) thread.unread = true
-    else if (
-      !thread.running &&
-      thread.transcriptFile &&
-      now - thread.lastActivityAt < REPLY_WINDOW_MS &&
-      (await awaitingReply(thread.transcriptFile))
-    ) {
-      thread.unread = true
+    const replied =
+      waiting ||
+      (!thread.running &&
+        thread.transcriptFile &&
+        now - thread.lastActivityAt < REPLY_WINDOW_MS &&
+        (await awaitingReply(thread.transcriptFile)))
+    if (replied) {
+      // A thread waiting on you last did something when it replied. Claude Code goes on writing
+      // bookkeeping to the transcript after that (the last prompt, a title, the mode) whenever a
+      // session is reopened, and taking the file's time for its activity made a reply you had
+      // already read look newer than your look at it: the hand went straight back up.
+      if (typeof replied === 'number' && replied < thread.lastActivityAt) thread.lastActivityAt = replied
+      if (now - thread.lastActivityAt < REPLY_WINDOW_MS || waiting) thread.unread = true
     }
     const errands = subagents.get(thread.cliSessionId)
     if (errands) thread.subagents = errands

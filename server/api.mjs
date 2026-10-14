@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { previewLink } from './link.mjs'
+import { freshLoop, LOOP_SKILLS } from './loops.mjs'
+import { readMarkdown } from './mdfile.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { shareRoles, shareRoute } from './conductor.mjs'
 import { activeRun, answerPermission, attachRun, chatStatus, getRun, listCommands, modeOf, modelOf, setRunModel, queueMessage, renameThread, setRunMode, startChat, startRun, stopRun } from './chat.mjs'
@@ -471,6 +473,24 @@ async function chat(pathname, req, res) {
   /** What the chat's link panel should show for a link a reply gave: a PR, an issue, or a page. */
   if (pathname === '/api/chat/link') {
     return send(res, 200, await previewLink(String(body.url || '')))
+  }
+
+  /** A markdown file a chat names, read to show beside the chat. */
+  if (pathname === '/api/chat/file') {
+    const file = await readMarkdown(body.path, typeof body.cwd === 'string' ? body.cwd : '')
+    return send(res, file.ok ? 200 : 404, file)
+  }
+
+  /** Stop the session running /pr-watch or /review-queue and start that skill afresh. */
+  if (pathname === '/api/chat/loop') {
+    const skill = String(body.skill || '')
+    if (!LOOP_SKILLS.includes(skill)) return send(res, 400, { ok: false, error: 'Not a loop skill' })
+    try {
+      const fresh = await freshLoop({ skill, oldSessionId: String(body.oldSessionId || '') })
+      return send(res, 200, { ok: true, ...fresh })
+    } catch (err) {
+      return send(res, 500, { ok: false, error: String(err?.message || err) })
+    }
   }
 
   if (pathname === '/api/chat/stop') {
