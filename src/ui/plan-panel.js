@@ -11,6 +11,7 @@ import { ICON } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 
 const LAST_PLAN = 'bot-crossing.last-plan'
+const SIZE = 'bot-crossing.plan-size'
 
 const TEMPLATE = `
 <div class="sheet panel">
@@ -44,9 +45,20 @@ export class PlanPanel {
     this.el.innerHTML = TEMPLATE
     parent.appendChild(this.el)
     this.$ = (s) => this.el.querySelector(s)
+    // The size you dragged it to, kept for next time.
+    const sheet = this.$('.sheet')
+    Object.assign(sheet.style, JSON.parse(localStorage.getItem(SIZE) || '{}'))
+    new ResizeObserver(() => {
+      const { width, height } = sheet.style
+      if (width && height) localStorage.setItem(SIZE, JSON.stringify({ width, height }))
+    }).observe(sheet)
     this.input = this.$('.search-box')
     this.input.value = localStorage.getItem(LAST_PLAN) || ''
-    this.el.addEventListener('click', (e) => e.target === this.el && this.close())
+    // Only a click that starts on the backdrop closes it: a resize or text selection dragged past
+    // the sheet's edge ends there too, and lands its click on the backdrop.
+    let downOnBackdrop = false
+    this.el.addEventListener('pointerdown', (e) => (downOnBackdrop = e.target === this.el))
+    this.el.addEventListener('click', (e) => downOnBackdrop && e.target === this.el && this.close())
     this.$('[data-close]').addEventListener('click', () => this.close())
     this.$('[data-preview]').addEventListener('click', () => this.load())
     this.$('[data-start]').addEventListener('click', () => this.start())
@@ -84,7 +96,7 @@ export class PlanPanel {
   async load() {
     const plan = this.input.value.trim()
     if (!plan) return this.note('Give the path of a plan.md', true)
-    this.note('Reading the plan…')
+    this.note('Opus is reading the whole plan…')
     clearTimeout(this.polling)
     try {
       this.show(await sharePreview(plan))
@@ -96,24 +108,28 @@ export class PlanPanel {
     }
   }
 
-  /** Poll the exercise until every repo is done or failed; Start waits for it. */
+  /**
+   * Follow the preview: Opus reads the whole plan into repo sessions, then exercises each one
+   * against its code. Start waits for it.
+   */
   async follow() {
     const preview = this.preview
-    if (!preview?.job) return this.note(preview?.sessions.length ? '' : 'No repo session to exercise')
+    if (!preview?.job) return
     try {
-      const { repos, done } = await shareExercise(preview.job)
+      const view = await shareExercise(preview.job)
       if (this.preview !== preview) return
-      preview.exercise = repos
+      Object.assign(preview, view)
       this.show(preview)
-      if (!done) {
-        const busy = Object.entries(repos).filter(([, r]) => r.status !== 'done' && r.status !== 'failed').map(([repo]) => repo)
-        this.note(`Opus is exercising the plan against the code: ${busy.join(', ')}…`)
+      if (!view.done) {
+        const busy = Object.entries(view.repos).filter(([, r]) => r.status !== 'done' && r.status !== 'failed').map(([repo]) => repo)
+        this.note(view.phase === 'reading' ? 'Opus is reading the whole plan…' : `Opus is exercising the plan against the code: ${busy.join(', ')}…`)
         this.polling = setTimeout(() => this.follow(), 2500)
-      } else {
-        const failed = Object.values(repos).filter((r) => r.status === 'failed').length
-        const cost = Object.values(repos).reduce((sum, r) => sum + (r.reused ? 0 : r.exercise?.cost_usd || 0), 0)
-        this.note(`${failed ? `${failed} exercise${failed === 1 ? '' : 's'} failed; those sessions start from the plan alone. ` : 'Exercised. '}${cost ? `Opus cost $${cost.toFixed(2)}.` : ''}`, Boolean(failed))
+        return
       }
+      if (view.error) return this.note(view.error, true)
+      if (!view.sessions.length) return this.note('Opus found no agent work in this plan.', true)
+      const failed = Object.values(view.repos).filter((r) => r.status === 'failed').length
+      this.note(`${failed ? `${failed} exercise${failed === 1 ? '' : 's'} failed; those sessions start from the plan alone. ` : 'Read and exercised. '}${view.cost_usd ? `Opus cost $${view.cost_usd.toFixed(2)}.` : ''}`, Boolean(failed))
     } catch (err) {
       if (this.preview === preview) this.note(err.message, true)
     }
@@ -125,8 +141,7 @@ export class PlanPanel {
    */
   show(preview) {
     this.preview = preview
-    const exercising = Object.values(preview?.exercise || {}).some((r) => r.status !== 'done' && r.status !== 'failed')
-    this.$('[data-start]').disabled = !preview?.sessions.length || exercising
+    this.$('[data-start]').disabled = !preview?.done || !preview.sessions.length
     const body = this.$('.plan-body')
     if (!preview) {
       body.replaceChildren(this.$('.plan-hint') || el('p', 'plan-hint'))
@@ -134,7 +149,7 @@ export class PlanPanel {
     }
     const picked = Object.fromEntries([...this.el.querySelectorAll('.plan-row select')].map((s) => [s.dataset.repo, s.value]))
     const rows = preview.sessions.map((s) => {
-      const ex = preview.exercise?.[s.repo] || {}
+      const ex = preview.repos?.[s.repo] || {}
       const row = el('div', 'plan-row')
       const info = el('div', 'info')
       const state = { queued: 'waiting to start', reading: 'Opus is reading the code…', done: ex.reused ? 'exercised (kept from last time)' : 'exercised', failed: `exercise failed: ${ex.error || ''}` }[ex.status] || ''
@@ -163,7 +178,17 @@ export class PlanPanel {
       return row
     })
     const head = el('div', 'plan-file', preview.file)
-    const warn = preview.warnings.map((w) => el('div', 'plan-warn', w.replace(/^! /, '')))
+    const human = preview.warnings.filter((w) => w.startsWith('For you, not a session: ')).map((w) => w.slice(24))
+    const warn = preview.warnings.filter((w) => !w.startsWith('For you')).map((w) => el('div', 'plan-warn', w.replace(/^! /, '')))
+    if (human.length) {
+      const list = el('ul', 'plan-steps')
+      for (const h of human) list.append(el('li', '', h.replace(/`/g, '')))
+      const box = el('div', 'plan-row plan-human')
+      const info = el('div', 'info')
+      info.append(el('div', 'title', 'For you'), el('div', 'sub', 'The plan gives these to a person; no session runs them.'), list)
+      box.append(info)
+      warn.push(box)
+    }
     const where = el('p', 'plan-hint', `Opus 5.5 exercises each repo; the sessions implement on the model picked. Pushes, PRs and risky commands wait for your Allow. The orchestrator opens as a chat in ${preview.home}.`)
     body.replaceChildren(head, ...warn, ...rows, where)
   }

@@ -113,18 +113,49 @@ export function parsePlan(text, { isRepo }) {
     repos.set(f.repo, r)
   }
   const out = [...repos.values()].map((r) => ({ ...r, dependsOn: [...r.dependsOn] }))
-  // A cycle would leave sessions waiting on each other forever.
+  noCycles(out)
+  // With a Files to Change list, a design step that names no repo is context, not lost work.
+  const unassigned = files.length ? [] : steps.filter((s) => !s.repo).map((s) => ({ n: s.n, title: s.title, why: s.why }))
+  return { repos: out, unassigned }
+}
+
+/** A cycle would leave sessions waiting on each other forever. */
+function noCycles(repos) {
+  const byRepo = new Map(repos.map((r) => [r.repo, r]))
   const seen = new Set()
   const visit = (name, trail) => {
     if (trail.includes(name)) throw new Error(`Steps depend on each other in a cycle: ${[...trail, name].join(' -> ')}`)
     if (seen.has(name)) return
-    for (const p of repos.get(name)?.dependsOn || []) visit(p, [...trail, name])
+    for (const p of byRepo.get(name)?.dependsOn || []) visit(p, [...trail, name])
     seen.add(name)
   }
-  for (const r of out) visit(r.repo, [])
-  // With a Files to Change list, a design step that names no repo is context, not lost work.
-  const unassigned = files.length ? [] : steps.filter((s) => !s.repo).map((s) => ({ n: s.n, title: s.title, why: s.why }))
-  return { repos: out, unassigned }
+  for (const r of repos) visit(r.repo, [])
+}
+
+/** Where Opus's reading of a whole plan is kept: which repo sessions it makes, and in what order. */
+export const readingFile = (store, key) => path.join(store.paths.root, 'exercises', `${key}.reading.json`)
+
+/**
+ * The repo sessions Opus read out of a plan, in the shape `parsePlan` gives, if a reading of
+ * this exact plan text is kept. Repos not on this machine are dropped, and said so.
+ */
+export function planFromReading(store, key, planText, isRepo) {
+  let reading
+  try {
+    reading = JSON.parse(fs.readFileSync(readingFile(store, key), 'utf8'))
+  } catch {
+    return null
+  }
+  if (reading.plan_hash !== exerciseHash(planText, '', [])) return null
+  const known = reading.sessions.filter((s) => isRepo(s.repo))
+  const repos = known.map((s) => ({
+    repo: s.repo,
+    steps: s.steps.map((x) => ({ title: x.title, body: x.detail || '' })),
+    dependsOn: s.depends_on.filter((d) => d !== s.repo && known.some((k) => k.repo === d)),
+  }))
+  noCycles(repos)
+  const unassigned = reading.sessions.filter((s) => !isRepo(s.repo)).map((s) => ({ n: 0, title: s.steps.map((x) => x.title).join('; '), why: `is for ${s.repo}, which is not a repo on this machine` }))
+  return { repos, unassigned, human: reading.human || [], notes: reading.notes || [] }
 }
 
 /** The rules from "Implementing a ticket" every plan session works under. */
@@ -144,7 +175,7 @@ const REPORT_FORMAT = `submit_report with:
 - artifacts: one per commit, path "<repo>@<short sha>", description = the commit subject
 - open_questions, needs_from_orchestrator`
 
-function goalFor(planFile, r, name, parents, exercise) {
+function goalFor(planFile, r, name, parents, exercise, notes = []) {
   const files = r.steps.filter((s) => s.file).map((s) => `- ${s.title}`)
   const steps = [...r.steps.filter((s) => !s.file).map((s) => `### ${s.title}\n${s.body}`), ...(files.length ? [`### Files to Change (${r.repo})\n${files.join('\n')}`] : [])].join('\n\n')
   const upstream = parents.length
@@ -153,7 +184,7 @@ function goalFor(planFile, r, name, parents, exercise) {
   return `Implement the \`${r.repo}\` part of the plan ${planFile}.
 Read the whole plan for context; only the steps and files below are yours. Work in your ${r.repo} worktree (branched from the remote base in the brief, not the local checkout) and commit on share/${name}.
 
-${steps}${upstream}${exercise ? `\n\n${renderExercise(exercise)}` : ''}`
+${steps}${upstream}${notes.length ? `\n\n## Rules from the plan, for every session\n${notes.map((n) => `- ${n}`).join('\n')}` : ''}${exercise ? `\n\n${renderExercise(exercise)}` : ''}`
 }
 
 /** What a repo session implements on: the latest Sonnet. Opus already exercised the plan. */
@@ -213,9 +244,12 @@ export async function runPlan(
 ) {
   const file = path.resolve(planFile)
   const planText = await fsp.readFile(file, 'utf8')
-  const plan = parsePlan(planText, { isRepo: repoChecker(store.reposDir) })
   const key = planKey(file)
-  for (const u of plan.unassigned) say(`! step ${u.n} "${u.title}" ${u.why}: not run. Name its repo in backticks in the heading to include it.`)
+  const isRepo = repoChecker(store.reposDir)
+  // Opus's reading of the whole plan when there is one; the heading parser only as a fallback.
+  const plan = planFromReading(store, key, planText, isRepo) || parsePlan(planText, { isRepo })
+  for (const u of plan.unassigned) say(u.n ? `! step ${u.n} "${u.title}" ${u.why}: not run. Name its repo in backticks in the heading to include it.` : `! "${u.title}" ${u.why}: not run.`)
+  for (const h of plan.human || []) say(`For you, not a session: ${h}`)
   const wanted = only.length ? plan.repos.filter((r) => only.includes(r.repo)) : plan.repos
   const modelOf = (repo) => models[repo] || model || IMPLEMENT_MODEL
   if (dry) {
@@ -254,7 +288,7 @@ export async function runPlan(
       say(`- ${name}: starting (${r.steps.length} step${r.steps.length === 1 ? '' : 's'})`)
       const state = await startSession(
         name,
-        { goal: goalFor(file, r, name, parents, readExercise(store, name, exerciseHash(planText, r.repo, r.steps.map((x) => x.title)))), limits: IMPLEMENT_LIMITS, repos: [r.repo], reportFormat: REPORT_FORMAT, mode: 'implement' },
+        { goal: goalFor(file, r, name, parents, readExercise(store, name, exerciseHash(planText, r.repo, r.steps.map((x) => x.title))), plan.notes), limits: IMPLEMENT_LIMITS, repos: [r.repo], reportFormat: REPORT_FORMAT, mode: 'implement' },
         { store, ...sessionOpts, model: modelOf(r.repo) }
       )
       say(`- ${name}: ${state.status}`)

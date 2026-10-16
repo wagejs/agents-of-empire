@@ -2502,6 +2502,19 @@ kbd {
   max-height: min(720px, calc(100dvh - 40px));
 }
 
+/* Drag the bottom-right corner, like the chat: an exercised plan is a lot to read. Once dragged
+   the size is yours, so the 720px cap gives way to the window. */
+.plan-run .sheet {
+  resize: both;
+  min-width: min(420px, calc(100vw - 24px));
+  min-height: min(260px, calc(100dvh - 24px));
+  max-width: calc(100vw - 24px);
+}
+
+.plan-run .sheet[style*='height'] {
+  max-height: calc(100dvh - 24px);
+}
+
 .plan-body {
   flex: 1;
   overflow-y: auto;
@@ -2714,6 +2727,12 @@ kbd {
 
 .chat .quote-btn[hidden] {
   display: none;
+}
+
+/* Start waits for the preview: say so, rather than look ready. */
+.plan-run [data-start]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Paging back through a long thread. */

@@ -48,10 +48,25 @@ await fsp.writeFile(
 )
 const store = openStore()
 
-/** A fake Opus: records what it was asked, answers each repo with an exercise. */
-const exerciser = (asked = []) => ({ prompt, options }) =>
+/** What the fake Opus reads out of a whole plan: be-api first, then fe-web; a task for the user. */
+const READING = {
+  sessions: [
+    { repo: 'be-api', steps: [{ title: 'Accept country_code', detail: 'handler reads it' }], depends_on: [] },
+    { repo: 'fe-web', steps: [{ title: 'Send country_code', detail: 'api client adds it' }], depends_on: ['be-api'] },
+    { repo: 'other', steps: [{ title: 'Edit a repo that is not here', detail: '' }], depends_on: [] },
+  ],
+  human: ['The user runs the ALTER on prod'],
+  notes: ['Never touch shared-lib'],
+}
+
+/** A fake Opus: records what it was asked; reads a whole plan into READING, exercises each repo. */
+const exerciser = (asked = [], reading = READING) => ({ prompt, options }) =>
   (async function* () {
     asked.push({ prompt, options })
+    if (/split the agent work/.test(prompt)) {
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0.3, structured_output: reading }
+      return
+    }
     const repo = /^Repo: (\S+)\./m.exec(prompt)[1]
     yield { type: 'result', subtype: 'success', total_cost_usd: 0.5, structured_output: { summary: `${repo} takes country_code.`, changes: [{ file: 'a.txt', change: 'read the param (a.txt:1)' }], tests: ['a_test: reads it'], risks: [], questions: [`${repo}: default country?`] } }
   })()
@@ -69,15 +84,22 @@ test('preview exercises the plan with Opus against each repo worktree, read-only
   const asked = []
   const { status, json } = await shareRoute('/api/share/preview', { plan }, { store, query: exerciser(asked), serveCheck: () => false, run: async () => {} })
   assert.equal(status, 200)
-  assert.deepEqual(json.sessions.map((s) => [s.name, s.model, s.dependsOn]), [
-    ['PROJ-7777-be-api', 'sonnet', []],
-    ['PROJ-7777-fe-web', 'sonnet', ['be-api']],
-  ])
+  assert.equal(json.phase, 'reading', 'Opus reads the whole plan first')
   assert.equal(json.models[0].id, 'sonnet')
   assert.equal(json.home, CONDUCTOR_HOME)
-  assert.match(json.warnings.join('\n'), /step 3 "3. Ops" names no repo/)
 
   const done = await exerciseDone(json.job)
+  const read = asked.find((a) => /split the agent work/.test(a.prompt))
+  assert.equal(read.options.model, 'claude-opus-5-5')
+  assert.deepEqual(read.options.tools, [], 'reading the plan needs no tools')
+  assert.match(read.prompt, /### 3\. Ops/, 'the whole plan, every section')
+  assert.deepEqual(read.options.outputFormat.schema.properties.sessions.items.properties.repo.enum, ['be-api', 'fe-web', 'other'], 'only repos on this machine')
+  assert.deepEqual(done.sessions.map((s) => [s.name, s.model, s.dependsOn, s.steps]), [
+    ['PROJ-7777-be-api', 'sonnet', [], ['Accept country_code']],
+    ['PROJ-7777-fe-web', 'sonnet', ['be-api'], ['Send country_code']],
+  ])
+  assert.match(done.warnings.join('\n'), /For you, not a session: The user runs the ALTER on prod/)
+  assert.match(done.warnings.join('\n'), /is for other, which is not a repo on this machine/)
   assert.deepEqual(Object.values(done.repos).map((r) => r.status), ['done', 'done'])
   assert.equal(done.repos['be-api'].exercise.summary, 'be-api takes country_code.')
   const be = asked.find((a) => /Repo: be-api/.test(a.prompt))
@@ -93,7 +115,7 @@ test('preview exercises the plan with Opus against each repo worktree, read-only
   // Unchanged plan: the kept exercise is used, Opus is not asked again.
   const again = await shareRoute('/api/share/preview', { plan }, { store, query: exerciser(asked), serveCheck: () => false, run: async () => {} })
   const reused = await exerciseDone(again.json.job)
-  assert.equal(asked.length, 2)
+  assert.equal(asked.length, 3, 'reading and both exercises kept: Opus is not asked again')
   assert.ok(Object.values(reused.repos).every((r) => r.reused))
 
   const failed = () => (async function* () { yield { type: 'result', subtype: 'error_max_turns' } })()
@@ -101,7 +123,7 @@ test('preview exercises the plan with Opus against each repo worktree, read-only
   await fsp.appendFile(plan, '\n<!-- edited -->\n')
   const broken = await shareRoute('/api/share/preview', { plan }, { store, query: failed, serveCheck: () => false, run: async () => {} })
   const after = await exerciseDone(broken.json.job)
-  assert.match(after.repos['be-api'].error, /could not finish the exercise \(error_max_turns\)/)
+  assert.match(after.error, /Opus could not read the plan \(error_max_turns\)/, 'an edited plan is read again, and a failed reading says so')
   const { readExercise, exerciseHash } = await import('../server/plan.mjs')
   assert.equal(readExercise(store, 'PROJ-7777-be-api', exerciseHash(await fsp.readFile(plan, 'utf8'), 'be-api', ['1. `be-api`: param'])), null, 'an exercise of the old plan does not count for the edited one')
   await fsp.writeFile(plan, original)
@@ -147,6 +169,7 @@ test('run_plan starts repo sessions in their worktrees on their models, and tell
   assert.match(seen[0].prompt, /## Exercise\nOpus read the plan against this code/)
   assert.match(seen[0].prompt, /- `a\.txt`: read the param \(a\.txt:1\)/)
   assert.match(seen[0].prompt, /- be-api: default country\?/)
+  assert.match(seen[0].prompt, /## Rules from the plan, for every session\n- Never touch shared-lib/, "the plan's rules, as Opus read them")
   for (const s of seen) assert.match(s.cwd, new RegExp(`/repos/${s.name.slice(8)}/\\.claude/worktrees/share-${s.name}$`), 'opens in its own worktree')
   assert.deepEqual(told.map((t) => [t.sessionId, t.cwd]), [['conductor-1', CONDUCTOR_HOME], ['conductor-1', CONDUCTOR_HOME]])
   assert.match(told[0].text, /PROJ-7777-be-api ended reported/)
@@ -218,4 +241,19 @@ test('Report to orchestrator passes on what you said to a repo session since its
   assert.match(told[1].text, /also bump the version/)
   assert.doesNotMatch(told[1].text, /validation script/, 'only what came since the last press')
   await assert.rejects(reportToOrchestrator({ cliSessionId: 'sid-orch' }, { store: st, read, start }), /not a repo session/)
+})
+
+test('a plan in any layout is read whole: an EPIC with tasks, human steps and no repo headings', async () => {
+  const epic = path.join(tmp, 'EPIC-auto-maintenance.md')
+  await fsp.writeFile(epic, '# Auto-maintenance\n\n## Order\nT1 then T2.\n\n## T1. Add a column\nThe user runs it.\n\n# Implementation steps\n\n## T2 steps (be-api, repository)\n1. write the flag\n')
+  const reading = { sessions: [{ repo: 'be-api', steps: [{ title: 'T2: write the flag', detail: 'repository write with history row' }], depends_on: [] }], human: ['T1: The user runs the column migration'], notes: [] }
+  const { json } = await shareRoute('/api/share/preview', { plan: epic }, { store, query: exerciser([], reading), serveCheck: () => false, run: async () => {} })
+  const done = await exerciseDone(json.job)
+  assert.equal(done.error, null)
+  assert.deepEqual(done.sessions.map((s) => [s.name, s.steps]), [['EPIC-auto-be-api', ['T2: write the flag']]])
+  assert.equal(done.repos['be-api'].status, 'done')
+  // Start reads the same split: run_plan dry gives the session Opus decided, with its detail in the brief.
+  const { runPlan } = await import('../server/plan.mjs')
+  const dry = await runPlan(epic, { store, dry: true, say: () => {} })
+  assert.deepEqual(dry.map((s) => s.repo), ['be-api'])
 })

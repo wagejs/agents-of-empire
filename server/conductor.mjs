@@ -20,7 +20,7 @@ import { z } from 'zod'
 import { activeRun, attachRun, provideSessionOptions, queueMessage, startRun } from './chat.mjs'
 import { cliBinary, newChatThread } from './harnesses/claude-code.mjs'
 import { approveReport, closeSession, collectReport, DEFAULT_MODEL, prepareRepos, resumeSession } from './orchestrator.mjs'
-import { exerciseFile, exerciseHash, IMPLEMENT_MODEL, planKey, readExercise, runPlan } from './plan.mjs'
+import { exerciseFile, exerciseHash, IMPLEMENT_MODEL, planFromReading, planKey, readExercise, readingFile, repoChecker, runPlan } from './plan.mjs'
 import { bashAllowed, canServeGraph, graphServers } from './session-tools.mjs'
 import { answerPermit, onAsk, pendingAsks, readPermits } from './permit.mjs'
 import { readMessages } from './scan.mjs'
@@ -392,52 +392,126 @@ ${plan}
 }
 
 
+const readingSchema = (repos) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: ['sessions', 'human', 'notes'],
+  properties: {
+    sessions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['repo', 'steps', 'depends_on'],
+        properties: {
+          repo: { type: 'string', ...(repos.length ? { enum: [...repos, 'other'] } : {}) },
+          steps: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: false, required: ['title', 'detail'], properties: { title: { type: 'string' }, detail: { type: 'string' } } },
+          },
+          depends_on: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+    human: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'array', items: { type: 'string' } },
+  },
+})
+
 /**
- * Exercise every repo session of a plan at once. Each result is kept in the store, where the
- * session's brief picks it up at Start; a plan that has not changed is not exercised again.
+ * Opus reads the whole plan, whatever its layout, and decides the repo sessions: which repo
+ * each piece of agent work belongs to, the order between them, and what is the user's to do.
+ * No tools: the plan is the input. Kept per plan text in the store, where Start reads it.
  */
-function startExercise(file, sessions, opts) {
+export async function readPlan(file, { store = openStore(), query = sdkQuery } = {}) {
+  const text = await fsp.readFile(file, 'utf8')
+  const isRepo = repoChecker(store.reposDir)
+  const repos = fs.existsSync(store.reposDir) ? fs.readdirSync(store.reposDir).filter(isRepo).sort() : []
+  const prompt = `Read this whole implementation plan and split the agent work in it into one session per repo. Each session is a coding agent working alone in that repo's git worktree; sessions run in parallel unless one depends on another.
+
+- sessions: one per repo that an agent changes. repo is the repo's folder name from this list: ${repos.join(', ') || '(none)'}; use "other" only for agent work in a repo not on that list. steps: that repo's work in plan order, each a short title and a detail of what to do, carrying the plan's own specifics (names, files, values, constraints, which section to follow). depends_on: the repos whose session must finish first, only where the plan says so or the work truly needs it.
+- human: work the plan gives to a person rather than an agent (a migration they run, a monitor they create, a rollout), one line each.
+- notes: anything else every session must know: rules the plan sets for all agents, order constraints, what is out of scope.
+Read all of it, not one section: plans name their tasks, steps and rules in different places.
+
+<plan path="${file}">
+${text}
+</plan>`
+  const options = {
+    model: EXERCISE_MODEL,
+    cwd: CONDUCTOR_HOME,
+    tools: [],
+    settingSources: [],
+    persistSession: false,
+    outputFormat: { type: 'json_schema', schema: readingSchema(repos) },
+    pathToClaudeCodeExecutable: (await cliBinary()) || undefined,
+  }
+  for await (const msg of query({ prompt, options })) {
+    if (msg.type !== 'result') continue
+    if (msg.subtype !== 'success' || !msg.structured_output) throw new Error(`Opus could not read the plan (${msg.subtype})`)
+    const reading = { ...msg.structured_output, plan_hash: exerciseHash(text, '', []), model: EXERCISE_MODEL, cost_usd: msg.total_cost_usd, at: new Date().toISOString() }
+    const out = readingFile(store, planKey(file))
+    await fsp.mkdir(path.dirname(out), { recursive: true })
+    await writeAtomic(out, JSON.stringify(reading, null, 2) + '\n')
+    return reading
+  }
+  throw new Error('Opus could not read the plan: no answer')
+}
+
+/**
+ * The preview, in the background: Opus reads the whole plan into repo sessions (kept while the
+ * plan is unchanged), then exercises each against its code at once. The page follows it.
+ */
+function startPreview(file, opts) {
   // Preview pressed again while Opus is still at it: follow the same run rather than pay twice.
   const running = [...shared.jobs.values()].find((j) => j.file === file && !j.done)
   if (running) return running
-  const job = { id: randomUUID(), file, repos: Object.fromEntries(sessions.map((s) => [s.repo, { status: 'queued' }])), done: false }
+  const job = { id: randomUUID(), file, phase: 'reading', sessions: [], warnings: [], repos: {}, cost_usd: 0, done: false }
   shared.jobs.set(job.id, job)
   const text = fs.readFileSync(file, 'utf8')
-  const one = async (s) => {
+  const exercise = async (s) => {
     const r = job.repos[s.repo]
     const hash = exerciseHash(text, s.repo, s.steps)
     const kept = readExercise(opts.store, s.name, hash)
     if (kept) return Object.assign(r, { status: 'done', exercise: kept, reused: true })
     try {
       r.status = 'reading'
-      const exercise = { ...(await exerciseRepo(file, s, opts)), plan_hash: hash, at: new Date().toISOString() }
+      const ex = { ...(await exerciseRepo(file, s, opts)), plan_hash: hash, at: new Date().toISOString() }
       await fsp.mkdir(path.dirname(exerciseFile(opts.store, s.name)), { recursive: true })
-      await writeAtomic(exerciseFile(opts.store, s.name), JSON.stringify(exercise, null, 2) + '\n')
-      Object.assign(r, { status: 'done', exercise })
+      await writeAtomic(exerciseFile(opts.store, s.name), JSON.stringify(ex, null, 2) + '\n')
+      job.cost_usd += ex.cost_usd || 0
+      Object.assign(r, { status: 'done', exercise: ex })
     } catch (err) {
       Object.assign(r, { status: 'failed', error: String(err?.message || err) })
     }
   }
-  Promise.all(sessions.map(one)).finally(() => {
-    job.done = true
-    // ponytail: finished jobs live in memory for an hour; the exercises themselves are on disk.
-    setTimeout(() => shared.jobs.delete(job.id), 3600_000).unref?.()
-  })
+  ;(async () => {
+    const isRepo = repoChecker(opts.store.reposDir)
+    if (!planFromReading(opts.store, planKey(file), text, isRepo)) job.cost_usd += (await readPlan(file, opts)).cost_usd || 0
+    const { sessions, warnings } = await checkPlan(file, {}, opts.store)
+    Object.assign(job, { sessions, warnings, phase: 'exercising', repos: Object.fromEntries(sessions.map((s) => [s.repo, { status: 'queued' }])) })
+    await Promise.all(sessions.map(exercise))
+  })()
+    .catch((err) => (job.error = String(err?.message || err)))
+    .finally(() => {
+      job.done = true
+      job.phase = 'done'
+      // ponytail: finished jobs live in memory for an hour; the reading and exercises are on disk.
+      setTimeout(() => shared.jobs.delete(job.id), 3600_000).unref?.()
+    })
   return job
 }
 
-/**
- * The preview: the sessions Start would run, and an exercise of each started in the
- * background. The page follows it with /api/share/exercise.
- */
+const jobView = (job) => ({ phase: job.phase, sessions: job.sessions, warnings: job.warnings, repos: job.repos, cost_usd: job.cost_usd, error: job.error || null, done: job.done })
+
+/** Preview a plan: started here, followed with /api/share/exercise. */
 async function previewPlan(plan, opts) {
   const file = expand(plan)
   if (!file.endsWith('.md')) throw new Error('A plan is a .md file')
   if (!fs.existsSync(file)) throw new Error(`No file at ${file}`)
-  const { sessions, warnings } = await checkPlan(file, {}, opts.store).catch((err) => ({ sessions: [], warnings: [err.message] }))
   await opts.store.init()
-  const job = sessions.length ? startExercise(file, sessions, opts) : null
-  return { file, sessions, warnings, job: job?.id || null, exercise: job?.repos || {} }
+  const job = startPreview(file, opts)
+  return { file, job: job.id, ...jobView(job) }
 }
 
 /** The page's calls: preview a plan, follow its exercise, start its orchestrator, and the rest. */
@@ -449,7 +523,7 @@ export async function shareRoute(pathname, body, { store = openStore(), query = 
   if (pathname === '/api/share/exercise') {
     const job = shared.jobs.get(String(body.job || ''))
     if (!job) return { status: 404, json: { error: 'That exercise is gone; press Preview again' } }
-    return { status: 200, json: { repos: job.repos, done: job.done } }
+    return { status: 200, json: jobView(job) }
   }
   if (pathname === '/api/share/answer') {
     return { status: 200, json: await answerPermit(store, String(body.id || ''), body.choice) }
