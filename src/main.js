@@ -10,6 +10,7 @@ import { Chat, lastChat } from './ui/chat.js'
 import { Search } from './ui/search.js'
 import { PlanPanel } from './ui/plan-panel.js'
 import { PLANETS } from './world/planet.js'
+import { mirrorStorage } from './core/storage-mirror.js'
 import { DECK_TOP, PLOT_CELL, hexToWorld, worldToHex } from './world/plots.js'
 import { planMove } from './world/plot-move.js'
 import { loadKit } from './world/kit.js'
@@ -1275,14 +1276,20 @@ function chimeForNewWaiting(list, archivedSet, hiddenSet) {
     if (archivedSet.has(t.id) || hiddenSet.has(t.project)) continue
     if (statusFor(t, now) === 'waiting') waiting.add(t.id)
   }
+  const fresh = []
   if (seenFirstRoster) {
     for (const id of waiting) {
-      if (waitingBefore.has(id) || now - lastChime < 2500) continue
+      if (waitingBefore.has(id)) continue
+      // Every new wait gets its own desktop alert; the chime still covers a burst once.
+      const t = list.find((x) => x.id === id)
+      fresh.push({ id, title: t?.title || '', project: t?.project || '' })
+      if (now - lastChime < 2500) continue
       lastChime = now
       const agent = colony.agentFor(id)
       ambience.play('chime-attention', agent ? { x: agent.pos.x, y: agent.pos.y + 1, z: agent.pos.z, gain: 0.9 } : { gain: 0.9 })
     }
   }
+  window.botCrossingApp?.waiting(waiting.size, fresh)
   seenFirstRoster = true
   waitingBefore.clear()
   for (const id of waiting) waitingBefore.add(id)
@@ -1483,7 +1490,11 @@ function soundWorld() {
 }
 
 engine.start()
+// In the desktop app: draw nothing while the window is hidden, and a notification click flies to its bot.
+window.botCrossingApp?.onVisible((visible) => (visible ? engine.start() : engine.stop()))
+window.botCrossingApp?.onSelect((id) => select(id, { fly: true }))
 boot()
+mirrorStorage()
 
 // Handy for poking at the running colony from the console.
 window.botCrossing = { engine, rig, colony, settings, hud, ambience, poll, get threads() { return threads } }

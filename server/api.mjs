@@ -25,6 +25,21 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = process.env.BOT_CROSSING_DATA || path.join(here, '..', 'data')
 const STATE_FILE = path.join(DATA_DIR, 'colony.json')
 
+/**
+ * The page's own browser storage (chat modes and sizes, the open chat, the last plan), mirrored
+ * here so the desktop app starts where the browser tab left off. The keys are the page's only.
+ */
+export const STORAGE_FILE = path.join(DATA_DIR, 'storage.json')
+const OWN_KEY = /^bot-?crossing\./
+
+export function cleanStorage(body) {
+  const pick = (o) =>
+    Object.fromEntries(
+      Object.entries(asObject(o)).filter(([k, v]) => OWN_KEY.test(k) && typeof v === 'string' && v.length < 256 * 1024)
+    )
+  return { local: pick(body?.local), session: pick(body?.session) }
+}
+
 const STATE_VERSION = 2
 
 /**
@@ -575,6 +590,20 @@ export async function apiMiddleware(req, res, next) {
 
     if (url.pathname === '/api/harnesses' && req.method === 'GET') {
       return send(res, 200, { harnesses: await harnessStatus() })
+    }
+
+    if (url.pathname === '/api/storage' && req.method === 'GET') {
+      const raw = await fsp.readFile(STORAGE_FILE, 'utf8').catch(() => '{}')
+      return send(res, 200, cleanStorage(JSON.parse(raw || '{}')))
+    }
+
+    if (url.pathname === '/api/storage' && req.method === 'POST') {
+      const clean = cleanStorage(await readJsonBody(req))
+      await fsp.mkdir(DATA_DIR, { recursive: true })
+      const tmp = `${STORAGE_FILE}.${process.pid}.${++tmpSeq}.tmp`
+      await fsp.writeFile(tmp, JSON.stringify(clean, null, 2))
+      await fsp.rename(tmp, STORAGE_FILE)
+      return send(res, 200, { ok: true })
     }
 
     if (url.pathname === '/api/state' && req.method === 'GET') {

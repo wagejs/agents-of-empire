@@ -61,3 +61,10 @@ test('globs, snake_case and arithmetic are not emphasis', () => {
   const [p] = parseMarkdown('use src/*.js and *.ts in my_var_name, 2*3*4')
   assert.deepEqual(p.children, ['use src/*.js and *.ts in my_var_name, 2*3*4'])
 })
+
+test('a link to a repo file shows its path as code; other schemes stay text', () => {
+  const [p] = parseMarkdown('[api.mjs:25](server/api.mjs:25) [x](javascript:alert(1)) [y](file:///etc/passwd)')
+  const [code, ...rest] = p.children
+  assert.deepEqual(code, n('code', ['server/api.mjs:25']))
+  assert.equal(rest.join(''), ' [x](javascript:alert(1)) [y](file:///etc/passwd)')
+})

@@ -27,7 +27,8 @@ function resolveInDist(pathname) {
   return file === DIST || file.startsWith(DIST + path.sep) ? file : null
 }
 
-const server = http.createServer(async (req, res) => {
+/** The whole app: the API, then dist/. The Electron shell serves this too. */
+export async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost')
 
   if (url.pathname.startsWith('/api/')) {
@@ -56,8 +57,10 @@ const server = http.createServer(async (req, res) => {
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found')
   }
-})
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`Bot Crossing → http://${HOST}:${PORT}`)
-})
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  http.createServer(handle).listen(PORT, HOST, () => {
+    console.log(`agents-world → http://${HOST}:${PORT}`)
+  })
+}

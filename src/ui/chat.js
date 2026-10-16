@@ -61,14 +61,32 @@ const div = (className, text) => {
 /** A path to a markdown file, as Claude writes one: `docs/plan.md`, `~/notes.md`, `/abs/x.md`. */
 const MD_PATH = /^[~./\w@-][^\s`'"<>]*\.(md|markdown)$/i
 
+/** A local path as Claude writes one: `src/ui/chat.js:42`, `~/notes.md`, `/abs/dir`, `api.mjs`. */
+const LOCAL_PATH = /^(?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+\/?(?::\d+(?:-\d+)?)?$|^[\w@.+-]+\.[a-z]\w{0,7}(?::\d+(?:-\d+)?)?$/i
+
+/** A small copy button after a link or a path; the click is caught on the log, see the constructor. */
+function copyButton(text) {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'copy-link'
+  b.dataset.copy = text
+  b.title = `Copy ${text}`
+  b.setAttribute('aria-label', `Copy ${text}`)
+  b.innerHTML = ICON.copy
+  return b
+}
+
 /**
- * Make every markdown path in `el` that Claude wrote as inline code open beside the chat. Code
- * blocks are left alone: a path in the middle of a script is not an invitation to read it.
+ * Every markdown path in `el` that Claude wrote as inline code opens beside the chat, and every
+ * link or path gets a copy button. Code blocks are left alone: a path in the middle of a script
+ * is not an invitation to read it, and the block is there to select whole.
  */
-function markMdPaths(el) {
+function markLinks(el) {
+  for (const a of el.querySelectorAll('a[href]')) a.after(copyButton(a.href))
   for (const code of el.querySelectorAll('code')) {
     if (code.closest('pre')) continue
     const text = code.textContent.trim()
+    if (LOCAL_PATH.test(text) || /^https?:\/\//i.test(text)) code.after(copyButton(text))
     if (!MD_PATH.test(text)) continue
     code.dataset.md = text
     code.classList.add('md-file')
@@ -80,7 +98,7 @@ function markMdPaths(el) {
 const markdown = (text) => {
   const el = div('md')
   el.append(renderMarkdown(text))
-  return markMdPaths(el)
+  return markLinks(el)
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -218,6 +236,20 @@ export class Chat {
       if (!file || getSelection()?.toString()) return
       e.preventDefault()
       this.openFile(file.dataset.md)
+    })
+    // A copy button beside a link or path copies it, and nothing else happens.
+    this.log.addEventListener('click', (e) => {
+      const b = e.target.closest?.('[data-copy]')
+      if (!b) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      navigator.clipboard.writeText(b.dataset.copy).then(
+        () => {
+          b.classList.add('done')
+          setTimeout(() => b.classList.remove('done'), 1200)
+        },
+        () => {}
+      )
     })
     // A link Claude gives, a PR say, opens in a panel beside the chat rather than a tab.
     this.log.addEventListener('click', (e) => {
@@ -974,7 +1006,7 @@ export class Chat {
       live.queued = false
       const following = this.atBottom()
       live.el.replaceChildren(renderMarkdown(live.text))
-      markMdPaths(live.el)
+      markLinks(live.el)
       if (following) this.scroll()
     })
   }

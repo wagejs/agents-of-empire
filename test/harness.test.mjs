@@ -678,6 +678,29 @@ test('a record the app still holds outranks a leftover deletion marker', async (
   await fsp.rm(fx.root, { recursive: true, force: true })
 })
 
+/** What `/rename` and the SDK's `renameSession` append to the end of a transcript. */
+const renamed = (customTitle) => ({ type: 'custom-title', customTitle, sessionId: SESSION_ID })
+
+test('a rename at the end of a long transcript is seen past the head', async () => {
+  const filler = Array.from({ length: 50 }, () => ({
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(8 * 1024) }] },
+  }))
+  const fx = await fakeClaude({ transcript: [typed('first prompt'), ...filler, renamed('Renamed late')] })
+  const file = path.join(fx.configDir, 'projects', '-tmp-demo', `${SESSION_ID}.jsonl`)
+  assert.ok((await fsp.stat(file)).size > 192 * 1024, 'bigger than the head the scan reads')
+  const [t] = await (await claudeWith(fx)).scanThreads()
+  assert.equal(t.title, 'Renamed late')
+  await fsp.rm(fx.root, { recursive: true, force: true })
+})
+
+test('renamed twice, a thread shows the latest name', async () => {
+  const fx = await fakeClaude({ transcript: [typed('first prompt'), renamed('First name'), typed('more'), renamed('Second name')] })
+  const [t] = await (await claudeWith(fx)).scanThreads()
+  assert.equal(t.title, 'Second name')
+  await fsp.rm(fx.root, { recursive: true, force: true })
+})
+
 /**
  * Kilo Code's store keeps whatever path the machine gave it, so the fixture uses one that is
  * absolute *here* rather than a Windows path pinned in place. The adapter refuses a cwd that is

@@ -6,7 +6,7 @@
  * one of the lists below has changed.
  */
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync } from 'node:fs'
 import { BOARD_MODELS } from '../src/world/hexboard.js'
 
 /**
@@ -68,10 +68,11 @@ for (const [script, ...args] of STEPS) {
 
 // The skeletons ship as they come: four small glbs on the crew's own rig. The crew merges
 // them at load time — see src/agents/skeletons.js.
-mkdirSync('public/assets/skeletons', { recursive: true })
-for (const type of ['Minion', 'Rogue', 'Warrior', 'Mage']) {
-  cpSync(
-    `assets-src/KayKit_Skeletons_1.1_FREE/characters/gltf/Skeleton_${type}.glb`,
-    `public/assets/skeletons/skeleton_${type.toLowerCase()}.glb`
-  )
-}
+// Without the source pack (a fresh clone), the checked-in glbs stay as they are.
+const SKELETONS = 'assets-src/KayKit_Skeletons_1.1_FREE/characters/gltf'
+if (existsSync(SKELETONS)) {
+  mkdirSync('public/assets/skeletons', { recursive: true })
+  for (const type of ['Minion', 'Rogue', 'Warrior', 'Mage']) {
+    cpSync(`${SKELETONS}/Skeleton_${type}.glb`, `public/assets/skeletons/skeleton_${type.toLowerCase()}.glb`)
+  }
+} else console.log('build-assets: no skeleton pack, keeping the existing public/assets/skeletons')

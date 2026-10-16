@@ -5,6 +5,9 @@
  * github.com framed: GitHub refuses that. So a GitHub PR or issue is read on the server through
  * your `gh` login and drawn here; any other page is framed when it allows it, and otherwise
  * offered to the browser.
+ *
+ * In the desktop app every web link opens in a real browser view instead, laid over the panel's
+ * body: nothing there refuses to be shown, and you stay signed in to what you sign in to.
  */
 import { chatLink } from '../game/api.js'
 import { ICON } from './hud.js'
@@ -38,6 +41,9 @@ function checks(rollup = []) {
   return Object.entries(n).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(' · ')
 }
 
+/** The desktop shell's browser view, when the page runs in it. */
+const shell = window.botCrossingApp?.browser
+
 export class LinkPanel {
   constructor(parent) {
     this.el = el('div', 'link-panel panel')
@@ -45,6 +51,11 @@ export class LinkPanel {
     this.el.innerHTML = `
       <div class="link-head">
         <div class="info"><div class="title"></div><div class="sub"></div></div>
+        <span class="link-nav" hidden>
+          <button class="btn icon ghost" data-nav="back" title="Back">‹</button>
+          <button class="btn icon ghost" data-nav="forward" title="Forward">›</button>
+          <button class="btn icon ghost" data-nav="reload" title="Reload">↻</button>
+        </span>
         <a class="btn ghost" data-out target="_blank" rel="noopener noreferrer" title="Open in the browser">Open ↗</a>
         <button class="btn icon ghost" data-close title="Close">${ICON.close}</button>
       </div>
@@ -59,6 +70,50 @@ export class LinkPanel {
       e.preventDefault()
       this.open(a.href)
     })
+    if (shell) {
+      this.el.addEventListener('click', (e) => {
+        const nav = e.target.closest?.('[data-nav]')
+        if (nav) shell[nav.dataset.nav]()
+      })
+      shell.onEscape(() => this.isOpen && this.close())
+      shell.onState((s) => {
+        if (!this.browsing) return
+        this.$('.title').textContent = s.title || new URL(s.url).host
+        this.$('.sub').textContent = s.loading ? `Loading… ${s.url}` : s.url
+        this.$('[data-out]').href = s.url
+        this.$('[data-nav="back"]').disabled = !s.back
+        this.$('[data-nav="forward"]').disabled = !s.forward
+      })
+    }
+  }
+
+  /** Put the browser view over the panel's body, and keep it there as the chat moves or resizes. */
+  browse(url) {
+    this.browsing = true
+    this.$('.link-nav').hidden = false
+    this.$('.title').textContent = new URL(url).host
+    this.$('.sub').textContent = url
+    shell.open(url)
+    // ponytail: one rect read a frame while the panel is open; a ResizeObserver misses moves.
+    let last = ''
+    const follow = () => {
+      if (!this.browsing) return
+      const r = this.$('.link-body').getBoundingClientRect()
+      const key = `${r.x},${r.y},${r.width},${r.height}`
+      if (key !== last) shell.bounds({ x: r.x, y: r.y, width: r.width, height: r.height })
+      last = key
+      this.follow = requestAnimationFrame(follow)
+    }
+    cancelAnimationFrame(this.follow)
+    follow()
+  }
+
+  stopBrowsing() {
+    if (!this.browsing) return
+    this.browsing = false
+    cancelAnimationFrame(this.follow)
+    this.$('.link-nav').hidden = true
+    shell.hide()
   }
 
   get isOpen() {
@@ -66,6 +121,7 @@ export class LinkPanel {
   }
 
   close() {
+    this.stopBrowsing()
     this.el.hidden = true
     this.el.parentElement?.classList.remove('with-link')
     this.$('.link-body').replaceChildren()
@@ -77,6 +133,7 @@ export class LinkPanel {
    * the panel's foot, or nothing. Returns the body, for whoever wants to update it.
    */
   showDoc({ title, sub = '', markdown, actions = null, key = '' }) {
+    this.stopBrowsing()
     this.url = null
     this.docKey = key
     this.el.hidden = false
@@ -114,6 +171,7 @@ export class LinkPanel {
     this.$('.sub').textContent = 'Loading…'
     const body = this.$('.link-body')
     body.replaceChildren()
+    if (shell) return this.browse(url)
     let link
     try {
       link = await chatLink(url)

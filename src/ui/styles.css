@@ -1409,6 +1409,15 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+.link-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.link-nav[hidden] {
+  display: none;
+}
+
 .link-head .info {
   flex: 1;
   min-width: 0;
@@ -2742,4 +2751,38 @@ kbd {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+/* Copy beside a link or a path in the chat: faint until you point at the line. */
+.chat .copy-link {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 3px;
+  padding: 1px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  opacity: 0.35;
+  cursor: pointer;
+}
+
+.chat .copy-link svg {
+  width: 13px;
+  height: 13px;
+}
+
+.chat :is(p, li, td):hover > .copy-link,
+.chat .copy-link:focus-visible {
+  opacity: 1;
+}
+
+.chat .copy-link:hover {
+  color: var(--text, inherit);
+  background: var(--line);
+}
+
+.chat .copy-link.done {
+  opacity: 1;
+  color: #4ade80;
 }

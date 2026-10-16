@@ -26,6 +26,19 @@ Do these steps:
 
 2. Open http://localhost:5274 in your browser.
 
+Or run it as a desktop app:
+
+```bash
+npm install && npm run app
+```
+
+- The app serves the colony on `127.0.0.1:5275`. Set `PORT` to use a different port.
+- Close the window to hide it. The colony keeps running, and the dock icon shows it again. Quit (⌘Q) stops it.
+- When a thread needs you and the window is in the background, you get a notification. Click it to go to the bot.
+- A link in the chat opens in a browser beside the chat, also for sites that a browser tab cannot frame (GitHub, Jira). Sign in once in that panel and you stay signed in. **Open ↗** opens the page in your own browser.
+- The app and the browser tab share one colony (`data/`). Chat modes, chat sizes, the open chat and the last plan go through `data/storage.json`. The first browser tab you open fills it, and after that the last change wins.
+- Each person runs the app on their own computer, with their own `claude` login. Nothing is shared.
+
 Other commands:
 
 - `npm start`: build the app and serve it. Use this to chat while you change the code.

@@ -168,6 +168,10 @@ function span([all, code, bold, bold2, strike, em, em2, label, url, bare]) {
   if (bold ?? bold2) return node('strong', inline(bold ?? bold2))
   if (strike) return node('del', inline(strike))
   if (em ?? em2) return node('em', inline(em ?? em2))
-  if (label) return SAFE_URL.test(url) ? node('a', inline(label), { href: url }) : all
+  if (label) {
+    if (SAFE_URL.test(url)) return node('a', inline(label), { href: url })
+    // A link to a file in the repo (`[api.mjs:25](server/api.mjs:25)`) shows its path, as code.
+    return /^[^\s:]+(?::\d+(?:-\d+)?)?$/.test(url) && !/^[a-z][\w+.-]*:/i.test(url) ? node('code', [url]) : all
+  }
   return node('a', [bare], { href: bare })
 }
