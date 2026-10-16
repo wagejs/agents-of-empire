@@ -113,7 +113,9 @@ export const newSession = (folder, harness, via) => post('/api/new-session', { f
 export const revealFolder = (folder) => post('/api/reveal', { folder })
 
 /** A thread's recent conversation, and whether it is open somewhere else right now. */
-export const chatMessages = (thread) => post('/api/chat/messages', { harness: thread.harness, ref: thread.ref })
+/** A thread's recent conversation; with `before` (a message id), the turns ahead of that one. */
+export const chatMessages = (thread, before) =>
+  post('/api/chat/messages', { harness: thread.harness, ref: thread.ref, ...(before ? { before } : {}) })
 
 /** Claude Code's own `/rename`, so `claude --resume` lists the thread under the new name too. */
 export const renameThread = (thread, title) => post('/api/chat/rename', { harness: thread.harness, ref: thread.ref, title })

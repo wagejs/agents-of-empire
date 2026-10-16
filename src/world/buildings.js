@@ -625,6 +625,10 @@ export function createBuilding({ seed = 1, accent = 0xc96442, kind = null, medie
   mesh.userData.label = label
   mesh.userData.height = height
   mesh.userData.footprint = footprint
+  // The model's own outline, before it is turned: what the crew walks round. A circle of
+  // `footprint` misses a turned building's corners by up to 40%.
+  const box = geo.boundingBox
+  mesh.userData.box = { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }
   mesh.userData.uniforms = uniforms
   mesh.userData.progress = 1
   mesh.userData.setProgress = (p) => {

@@ -868,6 +868,29 @@ export class Colony {
       // The grid blocks less than the whole footprint so the gaps stay walkable; the
       // keep radius is where the crew is actually held to — see `Navigation.repel`.
       obstacles.push({ x: p.x, z: p.z, r, keep: footprint * 0.92 + AGENT_RADIUS })
+      // The circle is sized to the building's sides, and a building stands turned, so its
+      // corners reach past the circle, up to 40% on the medieval models, and a builder
+      // could stand with its shoulder through a wall. Posts along the real, turned outline
+      // close that, without fattening the circle until it shuts the gaps between buildings.
+      const box = entry.mesh.userData.box
+      if (box) {
+        const cos = Math.cos(entry.mesh.rotation.y)
+        const sin = Math.sin(entry.mesh.rotation.y)
+        const post = 0.22
+        const edge = (x0, z0, x1, z1) => {
+          const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.45))
+          for (let i = 0; i < steps; i++) {
+            const lx = x0 + ((x1 - x0) * i) / steps
+            const lz = z0 + ((z1 - z0) * i) / steps
+            // three.js turns a point about Y as (x cos + z sin, −x sin + z cos).
+            obstacles.push({ x: p.x + lx * cos + lz * sin, z: p.z - lx * sin + lz * cos, r: post + TRAVEL_RADIUS, keep: post + AGENT_RADIUS })
+          }
+        }
+        edge(box.minX, box.minZ, box.maxX, box.minZ)
+        edge(box.maxX, box.minZ, box.maxX, box.maxZ)
+        edge(box.maxX, box.maxZ, box.minX, box.maxZ)
+        edge(box.minX, box.maxZ, box.minX, box.minZ)
+      }
     }
     // The town wall. A row of posts along every run, close enough that no gap between them
     // lets anyone through, both routed round and held to, so nobody wanders out of town.
@@ -920,7 +943,12 @@ export class Colony {
         const x = site.x + Math.cos(a) * site.radius
         const z = site.z + Math.sin(a) * site.radius
         if (site.contains && !site.contains(x, z)) continue
-        obstacles.push({ x, z, r: 0.14 + TRAVEL_RADIUS, keep: 0.14 + AGENT_RADIUS + 0.12 })
+        // Routed round at the size it is held to. A pole stands just outside the building's
+        // keep, so pole and building together close the gap between them. Routed as a thin
+        // stick, the grid saw that gap as open, the crew walked into it, was pushed back, and
+        // settled for the near side of its own building instead of its spot on the far side.
+        const keep = 0.14 + AGENT_RADIUS + 0.12
+        obstacles.push({ x, z, r: keep, keep })
       }
     }
 

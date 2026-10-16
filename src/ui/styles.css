@@ -2715,3 +2715,12 @@ kbd {
 .chat .quote-btn[hidden] {
   display: none;
 }
+
+/* Paging back through a long thread. */
+.chat .load-earlier {
+  align-self: center;
+  height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}

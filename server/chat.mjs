@@ -180,6 +180,9 @@ export function alwaysRule(suggestions) {
  */
 export const renameThread = (target, title) => renameSession(target.sessionId, title)
 
+/** How a chat from the page introduces itself to Claude Code; see where it is passed. */
+export const CHAT_ENTRYPOINT = 'claude-desktop'
+
 const denial = () => 'Denied in Bot Crossing'
 
 const errorOf = (m) =>
@@ -491,6 +494,13 @@ async function drive(run, target, text, query) {
         allowDangerouslySkipPermissions: true,
         // Your own CLI, so the session runs on the same version and login it was started with.
         pathToClaudeCodeExecutable: target.bin || undefined,
+        // Claude Code offers the Artifact tools only to a host that can show what they publish,
+        // and it tells hosts apart by this label. The SDK's own (`sdk-ts`) gets none, so a chat
+        // from here could not publish a page at all. The page shows artifacts like the desktop
+        // app does, so it says so.
+        // ponytail: an undocumented label, not an option; if Claude Code changes how it gates
+        // the tool, this stops working quietly, and the session simply has no Artifact again.
+        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: CHAT_ENTRYPOINT },
         abortController: run.abort,
         canUseTool,
         includePartialMessages: true,

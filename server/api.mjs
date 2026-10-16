@@ -420,16 +420,19 @@ async function chat(pathname, req, res) {
    * both would print every finished block of it twice.
    */
   if (pathname === '/api/chat/messages') {
-    const [log, target] = await Promise.all([readMessages(body.harness, body.ref), chatTarget(body.harness, body.ref)])
+    const before = typeof body.before === 'string' ? body.before : ''
+    const [log, target] = await Promise.all([readMessages(body.harness, body.ref, { before }), chatTarget(body.harness, body.ref)])
     if (!log.ok) return send(res, 400, log)
     const run = activeRun(target.sessionId)
     let messages = log.messages
-    if (run) {
+    // An older page is history only; the running reply is cut from the newest page alone.
+    if (run && !before) {
       const at = messages.findLastIndex((m) => m.role === 'user' && m.text === run.prompt)
       if (at !== -1) messages = messages.slice(0, at)
     }
     return send(res, 200, {
       messages,
+      more: Boolean(log.more),
       // While a reply of ours runs, the live process the registry finds is that reply's own
       // Claude Code: neither a window somewhere else nor somebody else's turn.
       live: Boolean(target.live) && !run,

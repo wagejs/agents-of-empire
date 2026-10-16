@@ -136,6 +136,6 @@ const chatOf = (harnessId) => {
   return h
 }
 
-export const readMessages = async (harnessId, ref) => chatOf(harnessId).readMessages(ref)
+export const readMessages = async (harnessId, ref, opts) => chatOf(harnessId).readMessages(ref, opts)
 
 export const chatTarget = async (harnessId, ref) => chatOf(harnessId).chatTarget(ref)

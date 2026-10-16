@@ -760,20 +760,34 @@ const CHAT_LIMIT = 400
  * The CLI writes one record per content block, so an assistant reply that spoke and then ran
  * two tools is three records sharing one `message.id` — grouped back into one message here.
  */
-async function readMessages(ref) {
+async function readMessages(ref, { before = '' } = {}) {
   const file = await transcriptOf(ref?.cliSessionId)
   if (!file) return { ok: false, error: 'That thread has no transcript on this machine' }
 
+  // `before` is the id of the oldest message the page already shows: the page wants the turns
+  // ahead of it. Anchored on a message rather than counted, so a reply still running at the end
+  // (which the page shows from its run, not from here) cannot shift what "older" means.
   const { size } = await fsp.stat(file)
   let messages = []
-  for (let bytes = CHAT_TAIL_BYTES; ; bytes *= 4) {
+  let end = 0
+  let bytes = CHAT_TAIL_BYTES
+  for (;;) {
     messages = parseMessages(jsonLines(await readTail(file, bytes)))
-    if (bytes >= size || bytes >= CHAT_MAX_BYTES || messages.filter((m) => m.role === 'user').length > CHAT_TURNS) break
+    end = before ? messages.findIndex((m) => m.id === before) : messages.length
+    const users = end > 0 ? messages.slice(0, end).filter((m) => m.role === 'user').length : 0
+    // Paging back may read the whole file; the first look stays within CHAT_MAX_BYTES.
+    if (bytes >= size || (!before && bytes >= CHAT_MAX_BYTES) || users > CHAT_TURNS) break
+    bytes *= 4
   }
+  if (end < 0) return { ok: true, messages: [], more: false }
+  const shown = messages.slice(0, end)
   // From your CHAT_TURNS-th last message on; with fewer than that, all there is.
-  const users = messages.flatMap((m, i) => (m.role === 'user' ? [i] : []))
+  const users = shown.flatMap((m, i) => (m.role === 'user' ? [i] : []))
   const from = users.length >= CHAT_TURNS ? users.at(-CHAT_TURNS) : 0
-  return { ok: true, messages: messages.slice(from).slice(-CHAT_LIMIT) }
+  const page = shown.slice(from).slice(-CHAT_LIMIT)
+  // More lies further back when this page did not start at the transcript's first message.
+  const more = shown.length - page.length > 0 || bytes < size
+  return { ok: true, messages: page, more }
 }
 
 /** A transcript's records as the popup's messages: yours, and Claude's text and tool calls. */
@@ -790,14 +804,14 @@ function parseMessages(records) {
       const text = stripTags(parts.join('\n'))
       // A tool result has no text part; a slash command is nothing but tags.
       if (!text || text.startsWith('<')) continue
-      messages.push({ role: 'user', text, tools: [] })
+      messages.push({ id: r.uuid || '', role: 'user', text, tools: [] })
       lastId = ''
       continue
     }
     if (r.type !== 'assistant' || !Array.isArray(content)) continue
     const id = r.message.id || r.uuid
     if (id !== lastId) {
-      messages.push({ role: 'assistant', text: '', tools: [] })
+      messages.push({ id: r.uuid || '', role: 'assistant', text: '', tools: [] })
       lastId = id
     }
     const msg = messages.at(-1)

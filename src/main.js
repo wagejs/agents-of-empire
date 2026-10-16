@@ -340,9 +340,15 @@ const actions = {
     if (!confirm(`${ask}\n\nIt runs in Allow all: tools run without asking. The skill's own questions still come to you.`)) return
     hud.toast(`Starting a fresh ${skill} session…`)
     try {
-      const { thread, mode } = await chatFreshLoop(skill, old?.ref?.cliSessionId || '')
-      if (old) setArchived([old.id], true)
+      const { thread, mode, stopped = [] } = await chatFreshLoop(skill, old?.ref?.cliSessionId || '')
+      // Every session the server stopped for this skill goes, whatever it ended up being called,
+      // and the one the page knew by name too. Thread ids are the harness's, `claude-code:<session>`.
+      const gone = new Set(stopped.map((id) => `claude-code:${id}`))
+      if (old) gone.add(old.id)
+      gone.delete(thread.id)
+      if (gone.size) setArchived([...gone], true)
       chat.carryMode?.(old?.id, thread.id, mode)
+      if (stopped.length > 1) hud.toast(`Stopped ${stopped.length} ${skill} sessions; one fresh one is running`)
       await poll()
       chat.open(threads.find((t) => t.id === thread.id) || thread)
     } catch (err) {

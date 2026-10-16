@@ -208,6 +208,10 @@ export class Chat {
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
     this.log = this.$('.chat-log')
+    // Scrolled up to the top of what is loaded: fetch the turns before it.
+    this.log.addEventListener('scroll', () => {
+      if (this.log.scrollTop < 80 && this.history?.more && !this.history.loading) this.loadEarlier()
+    })
     // A markdown file Claude wrote or named opens beside the chat, rendered.
     this.log.addEventListener('click', (e) => {
       const file = e.target.closest?.('[data-md]')
@@ -591,6 +595,7 @@ export class Chat {
     this.$('[data-report]').hidden = thread?.share?.role !== 'child'
     this.input.placeholder = placeholder
     this.log.replaceChildren()
+    this.history = null
     this.showSchedule([])
     remember(thread?.id)
     this.refreshNeedYou()
@@ -676,12 +681,12 @@ export class Chat {
     this.note('Loading…')
     this.sync()
     try {
-      const { messages, live, busy, where, run } = await chatMessages(thread)
+      const { messages, live, busy, where, run, more } = await chatMessages(thread)
       if (this.thread !== thread) return
-      for (const m of messages) {
-        const el = this.add(m.role, m.text)
-        for (const t of m.tools) el.append(toolLine(t.name, t.summary))
-      }
+      for (const m of messages) this.log.append(this.historyEl(m))
+      this.scroll()
+      this.history = { thread, oldest: messages[0]?.id || '', more: Boolean(more && messages[0]?.id), loading: false }
+      this.showEarlier()
       this.blocked = busy
       this.note(
         busy
@@ -728,6 +733,59 @@ export class Chat {
   }
 
   /** What you typed stays as typed; what Claude wrote is markdown. */
+  /** One message from the transcript, not yet placed. */
+  historyEl(m) {
+    const el = div(`msg ${m.role}`)
+    if (m.text) el.append(m.role === 'assistant' ? markdown(m.text) : div('text', m.text))
+    for (const t of m.tools) el.append(toolLine(t.name, t.summary))
+    return el
+  }
+
+  /** The "Load earlier" row at the top of the chat, there only while there is more to load. */
+  showEarlier() {
+    let row = this.log.querySelector(':scope > .load-earlier')
+    const h = this.history
+    if (!h?.more) return row?.remove()
+    if (!row) {
+      row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'btn ghost load-earlier'
+      row.addEventListener('click', () => this.loadEarlier())
+      this.log.prepend(row)
+    }
+    row.disabled = h.loading
+    row.textContent = h.loading ? 'Loading…' : 'Load earlier messages'
+  }
+
+  /**
+   * The ten turns ahead of the oldest one shown, put in above it without moving what you are
+   * reading: the view is shifted down by exactly what was added.
+   */
+  async loadEarlier() {
+    const h = this.history
+    if (!h?.more || h.loading || this.thread !== h.thread) return
+    h.loading = true
+    this.showEarlier()
+    try {
+      const { messages, more } = await chatMessages(h.thread, h.oldest)
+      if (this.history !== h) return
+      const anchor = this.log.querySelector(':scope > .load-earlier')?.nextSibling || this.log.firstChild
+      const height = this.log.scrollHeight
+      const top = this.log.scrollTop
+      const block = document.createDocumentFragment()
+      for (const m of messages) block.append(this.historyEl(m))
+      this.log.insertBefore(block, anchor)
+      this.log.scrollTop = top + (this.log.scrollHeight - height)
+      h.oldest = messages[0]?.id || h.oldest
+      h.more = Boolean(more && messages.length && messages[0]?.id)
+    } catch (err) {
+      this.note(err.message, true)
+    } finally {
+      h.loading = false
+      this.showEarlier()
+    }
+  }
+
   add(role, text) {
     const el = div(`msg ${role}`)
     if (text) el.append(role === 'assistant' ? markdown(text) : div('text', text))

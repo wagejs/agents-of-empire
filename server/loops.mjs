@@ -25,7 +25,7 @@ const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'projects'
 
 const until = async (test, ms, step = 250) => {
   for (const end = Date.now() + ms; Date.now() < end; ) {
-    if (test()) return true
+    if (await test()) return true
     await new Promise((r) => setTimeout(r, step))
   }
   return test()
@@ -62,21 +62,66 @@ export function handoff(skill, oldSessionId, transcript) {
 export const LOOP_MODE = 'bypassPermissions'
 
 /**
+ * Every run going for a skill, whatever its session has come to be called: started by this
+ * file, or by hand with `/<skill> …` as its first message. Found by the run, not by the thread's
+ * title, because a title is only a name: Claude Code titles a session itself when a rename has
+ * not landed, and a session nobody can find by name is one nobody stops, its timer still live.
+ */
+export function loopRuns(skill) {
+  const runs = globalThis[Symbol.for('bot-crossing.chat')]?.runs?.values() || []
+  return [...runs].filter(
+    (run) => !run.done && (run.loop === skill || new RegExp(`^/${skill}(\\s|$)`).test(String(run.prompt || '').trim()))
+  )
+}
+
+/**
+ * Name a session, once Claude Code has a transcript to write the name into. Too early and the
+ * rename has nowhere to go, which is how a fresh loop used to end up under a title of Claude
+ * Code's own choosing.
+ */
+export async function nameSession(sessionId, title, { rename = renameThread, wait = 60_000 } = {}) {
+  let file = ''
+  await until(async () => (file = await transcriptOf(sessionId)), wait, 500)
+  if (!file) return false
+  for (let tries = 0; tries < 5; tries++) {
+    try {
+      await rename({ sessionId }, title)
+      return true
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  }
+  return false
+}
+
+/**
  * Stop `oldSessionId`'s run if one is going, then start the skill afresh. Resolves once the new
  * session has an id, with the thread the page can open. `startChat` is the chat's, unless a
  * test hands in its own.
  */
-export async function freshLoop({ skill, oldSessionId = '' }, { start = startChat } = {}) {
+export async function freshLoop({ skill, oldSessionId = '' }, { start = startChat, name = nameSession } = {}) {
   if (!LOOP_SKILLS.includes(skill)) throw new Error(`Not a loop skill: ${skill}`)
-  const running = oldSessionId && activeRun(oldSessionId)
-  if (running) {
-    stopRun(running.id)
-    // Its process takes its schedule with it; wait, so two timers are never live at once.
-    await until(() => running.done, 15_000)
-  }
+  // Every session running this skill stops, not just the one the page knew to name: two live
+  // sessions mean two timers ticking.
+  const old = loopRuns(skill)
+  const named = oldSessionId && activeRun(oldSessionId)
+  if (named && !old.includes(named)) old.push(named)
+  for (const run of old) stopRun(run.id)
+  // Each process takes its schedule with it; wait, so two timers are never live at once.
+  await until(() => old.every((run) => run.done), 15_000)
+  const stopped = [...new Set([oldSessionId, ...old.map((run) => run.sessionId)].filter(Boolean))]
+  const previous = oldSessionId || stopped[0] || ''
+
   const run = await start(LOOP_CWD, `/${skill} start`, LOOP_MODE)
+  run.loop = skill
   if (!(await until(() => run.sessionId, 90_000))) throw new Error('The new session did not start in time')
-  queueMessage(run, handoff(skill, oldSessionId, await transcriptOf(oldSessionId)))
-  await renameThread({ sessionId: run.sessionId }, skill).catch(() => {})
-  return { runId: run.id, mode: LOOP_MODE, thread: { ...newChatThread(run.sessionId, LOOP_CWD), title: skill, project: path.basename(LOOP_CWD) } }
+  queueMessage(run, handoff(skill, previous, await transcriptOf(previous)))
+  // Not awaited: the name lands once the transcript exists, which can be a while after start.
+  name(run.sessionId, skill).then((ok) => !ok && console.warn(`[loops] could not name ${run.sessionId} "${skill}"`))
+  return {
+    runId: run.id,
+    mode: LOOP_MODE,
+    stopped,
+    thread: { ...newChatThread(run.sessionId, LOOP_CWD), title: skill, project: path.basename(LOOP_CWD) },
+  }
 }

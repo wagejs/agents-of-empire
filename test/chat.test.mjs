@@ -46,7 +46,8 @@ test.after(() => fsp.rm(root, { recursive: true, force: true }))
 test('the popup sees what was said, one message per reply, without the noise around it', async () => {
   const { ok, messages } = await claudeCode.readMessages(ref)
   assert.equal(ok, true)
-  assert.deepEqual(messages, [
+  // Each message carries its record's id, for paging back; what is said is what is checked here.
+  assert.deepEqual(messages.map(({ id, ...m }) => m), [
     { role: 'user', text: 'fix the bug\nplease', tools: [] },
     { role: 'assistant', text: 'Looking.', tools: [{ name: 'Bash', summary: 'ls' }] },
     { role: 'assistant', text: 'Done.', tools: [] },
@@ -471,7 +472,7 @@ test('under Allow all an ask Claude Code still raises is answered by the mode; A
 })
 
 test('a fresh loop stops the old session, starts the skill anew, and tells it what it replaces', async () => {
-  const { freshLoop, handoff } = await import('../server/loops.mjs')
+  const { freshLoop, handoff, loopRuns } = await import('../server/loops.mjs')
   // The old session: running until stopped.
   const old = startRun({ sessionId: SESSION_ID, cwd: root, threadId: THREAD_ID }, '/pr-watch start', {
     query: ({ options }) =>
@@ -479,6 +480,15 @@ test('a fresh loop stops the old session, starts the skill anew, and tells it wh
         await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve))
       })(),
   })
+  // A second session running the same skill, started by hand, that the page knows by no name.
+  const stray = startRun({ sessionId: '22222222-3333-4444-8555-666666666666', cwd: root, threadId: 'x' }, '/pr-watch tick', {
+    query: ({ options }) =>
+      (async function* () {
+        await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve))
+      })(),
+  })
+  assert.equal(loopRuns('pr-watch').length, 2)
+  assert.equal(loopRuns('review-queue').length, 0)
   const seen = []
   const NEW_ID = '11111111-2222-4333-8444-555555555555'
   const start = (cwd, text, mode) =>
@@ -493,14 +503,30 @@ test('a fresh loop stops the old session, starts the skill anew, and tells it wh
         })(),
     })
   // Whatever the old one ran in, a loop starts in Allow all.
-  const fresh = await freshLoop({ skill: 'pr-watch', oldSessionId: SESSION_ID }, { start })
+  const named = []
+  const name = async (sessionId, title) => named.push([sessionId, title])
+  const fresh = await freshLoop({ skill: 'pr-watch', oldSessionId: SESSION_ID }, { start, name })
   assert.equal(fresh.mode, 'bypassPermissions')
   assert.equal(old.done, true, 'the old session was stopped first')
+  assert.equal(stray.done, true, 'and so was the one nobody had a name for')
+  assert.deepEqual(fresh.stopped.sort(), [SESSION_ID, '22222222-3333-4444-8555-666666666666'].sort())
+  assert.deepEqual(named, [[NEW_ID, 'pr-watch']])
+  assert.deepEqual(loopRuns('pr-watch').map((r) => r.sessionId), [NEW_ID], 'only the fresh one is left running')
   assert.equal(fresh.thread.title, 'pr-watch')
   assert.equal(fresh.thread.ref.cliSessionId, NEW_ID)
   await until(() => seen.length === 2)
   assert.deepEqual(seen[0], { text: '/pr-watch start', mode: 'bypassPermissions' })
   assert.match(seen[1].text, new RegExp(`replaces an earlier /pr-watch session \\(${SESSION_ID}\\)`))
   assert.match(handoff('review-queue', '', ''), /carries over/)
-  await assert.rejects(freshLoop({ skill: 'rm -rf' }, { start }), /Not a loop skill/)
+  await assert.rejects(freshLoop({ skill: 'rm -rf' }, { start, name }), /Not a loop skill/)
+})
+
+test('a fresh loop is named once its transcript exists, and says so when it never does', async () => {
+  const { nameSession } = await import('../server/loops.mjs')
+  const renamed = []
+  const rename = async (target, title) => renamed.push([target.sessionId, title])
+  assert.equal(await nameSession(SESSION_ID, 'pr-watch', { rename, wait: 1000 }), true)
+  assert.deepEqual(renamed, [[SESSION_ID, 'pr-watch']])
+  assert.equal(await nameSession('99999999-9999-4999-8999-999999999999', 'pr-watch', { rename, wait: 600 }), false)
+  assert.equal(renamed.length, 1, 'nothing renamed that is not there')
 })

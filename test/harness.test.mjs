@@ -861,3 +861,25 @@ test('bookkeeping written after a reply does not make the reply look newer than 
   assert.equal(thread.lastActivityAt, Date.parse(at), 'its activity is the reply, not the file being touched since')
   await fsp.rm(fixture.root, { recursive: true, force: true })
 })
+
+test('a long thread pages back ten turns at a time, from the oldest message shown, without overlap', async () => {
+  const turns = []
+  for (let i = 1; i <= 25; i++) {
+    turns.push({ ...typed(`question ${i}`), uuid: `u${i}` })
+    turns.push({ type: 'assistant', uuid: `a${i}`, message: { id: `m${i}`, content: [{ type: 'text', text: `answer ${i}` }], stop_reason: 'end_turn' } })
+  }
+  const fx = await fakeClaude({ transcript: turns })
+  const h = await claudeWith(fx)
+  const ref = { cliSessionId: SESSION_ID, cwd: '/tmp/demo' }
+  const first = await h.readMessages(ref)
+  assert.equal(first.messages[0].text, 'question 16')
+  assert.equal(first.more, true)
+  const second = await h.readMessages(ref, { before: first.messages[0].id })
+  assert.deepEqual([second.messages[0].text, second.messages.at(-1).text], ['question 6', 'answer 15'])
+  assert.equal(second.more, true)
+  const third = await h.readMessages(ref, { before: second.messages[0].id })
+  assert.deepEqual([third.messages[0].text, third.messages.at(-1).text], ['question 1', 'answer 5'])
+  assert.equal(third.more, false, 'nothing before the first message')
+  assert.deepEqual((await h.readMessages(ref, { before: 'gone' })).messages, [], 'an anchor not in the thread finds nothing')
+  await fsp.rm(fx.root, { recursive: true, force: true })
+})
