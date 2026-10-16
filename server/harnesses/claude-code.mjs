@@ -176,7 +176,8 @@ function readTranscriptMeta(records) {
   for (const r of records) {
     // The latest model wins: `/model` can switch it mid-thread.
     if (r.type === 'assistant' && r.message?.model && r.message.model !== '<synthetic>') meta.model = r.message.model
-    if (!meta.customTitle && r.customTitle) meta.customTitle = r.customTitle
+    // The one field where the last record wins: every `/rename` appends a new one.
+    if (r.customTitle) meta.customTitle = r.customTitle
     if (!meta.aiTitle && r.aiTitle) meta.aiTitle = r.aiTitle
     if (!meta.summary && r.type === 'summary' && r.summary) meta.summary = r.summary
     if (!meta.cwd && r.cwd) meta.cwd = r.cwd
