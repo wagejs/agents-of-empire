@@ -2265,6 +2265,29 @@ body {
   margin-top: 0;
 }
 
+.help .badges {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.help .badges h3 {
+  grid-column: 1 / -1;
+}
+
+/* The right column is the long one: kept tight so the sheet fits a laptop screen unscrolled. */
+.help .orchestration p.sub {
+  margin-bottom: 8px;
+}
+
+.help .orchestration ol {
+  gap: 3px;
+}
+
+.help .help-col .legend-row {
+  padding: 3px 0;
+}
+
 .help .orchestration ol {
   margin: 8px 0;
   padding-left: 18px;

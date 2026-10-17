@@ -1439,13 +1439,6 @@ const TEMPLATE = `
         <div class="k"><span>Mute</span><kbd>M</kbd></div>
       </div>
     </div>
-    <div style="margin-top:16px">
-      <div class="legend-row"><i class="badge" style="background:#1a2b46;color:#8fb4ee">?</i> waiting on your reply — click to open the thread</div>
-      <div class="legend-row"><i class="badge" style="background:#3d1c1c;color:#e88b8b">!</i> the session hit an error</div>
-      <div class="legend-row"><i class="badge" style="background:#16301f;color:#7fd39a">⚒</i> running right now, building</div>
-      <div class="legend-row"><i class="badge" style="background:#332b12;color:#e6c67f">✓</i> its pull request landed</div>
-      <div class="legend-row"><i class="badge" style="background:#1d1f2e;color:#a9a8c0">z</i> nothing for three days</div>
-    </div>
       </div>
       <div class="help-col">
     <div class="orchestration">
@@ -1464,6 +1457,14 @@ const TEMPLATE = `
       <div class="legend-row"><i class="badge pin" style="background:#211d3d;color:#a79cf0"><svg viewBox="0 0 24 24"><path fill="currentColor" d="${mdiSourceBranch}"/></svg></i> <span><b>Repo session</b>, a child of the orchestrator. One per repo in the plan, standing in that repo's zone.</span></div>
       <p class="sub">The small pin sits on top of the status badge, so a child that is waiting on you shows both: the branch over the <b>?</b>.</p>
       <p class="sub"><b>Fresh loop</b> (↻ pr-watch, ↻ review-queue) restarts that skill in a new session. Its state, drafts and notes carry over.</p>
+    </div>
+    <div class="badges">
+      <h3>Status badges</h3>
+      <div class="legend-row"><i class="badge" style="background:#1a2b46;color:#8fb4ee">?</i> waiting on your reply — click to open the thread</div>
+      <div class="legend-row"><i class="badge" style="background:#3d1c1c;color:#e88b8b">!</i> the session hit an error</div>
+      <div class="legend-row"><i class="badge" style="background:#16301f;color:#7fd39a">⚒</i> running right now, building</div>
+      <div class="legend-row"><i class="badge" style="background:#332b12;color:#e6c67f">✓</i> its pull request landed</div>
+      <div class="legend-row"><i class="badge" style="background:#1d1f2e;color:#a9a8c0">z</i> nothing for three days</div>
     </div>
       </div>
     </div>
