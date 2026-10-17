@@ -1,135 +1,285 @@
 # Agents of Empire
 
-A fork of [Bot Crossing](https://github.com/jarrenrocks/bot-crossing) by Jarren Rocks
-([@jarrenrocks](https://github.com/jarrenrocks)). Bot Crossing shows each coding-agent thread on
-your computer as a bot in a 3D colony. This fork adds chat and thread control to the colony.
+A 3D colony for **every coding-agent thread on your computer**. Each thread is a bot that walks
+out of the ship, claims a plot for its repo and builds while it works. Chat with any Claude Code
+thread from the map, approve its tool calls, and run one plan across many repos at once while
+an orchestrator keeps you posted.
 
-Thank you, Jarren, for the colony, the bots and the harness adapters. For all other details
-(the harnesses, the controls, the world, the design and the art), refer to the original project
-at [github.com/jarrenrocks/bot-crossing](https://github.com/jarrenrocks/bot-crossing) and
-[botcrossing.com](https://botcrossing.com).
+![The help sheet: shortcuts, orchestration, and what the badges mean](docs/help-sheet.png)
 
-## Run it
+A fork of [**Bot Crossing**](https://github.com/jarrenrocks/bot-crossing) by Jarren Rocks
+([@jarrenrocks](https://github.com/jarrenrocks)), which draws the colony, the bots and the
+harness adapters. This fork adds chat, thread control and multi-repo orchestration.
 
-You need:
+![status: alpha](https://img.shields.io/badge/status-alpha-yellow)
+![licence: MIT](https://img.shields.io/badge/licence-MIT-blue)
 
-- Node.js 22.13 or later.
-- The [Claude Code](https://claude.com/claude-code) CLI, with a login. Chat uses it.
+---
 
-Do these steps:
+## What you get
 
-1. Install the packages and start the dev server:
+### The colony
 
-   ```bash
-   npm install && npm run dev
-   ```
+- **Every thread is a bot** — Claude Code, Codex CLI, OpenCode, Cursor, Antigravity, Kilo Code
+  and Hermes threads all appear, from whichever of them is on the machine.
+- **Every repo is a plot** — each repo gets a zone and a colour. Its bots, buildings and
+  name share that colour, so one repo reads as one group at a glance.
+- **Buildings grow with the work** — a thread's building rises from scaffolding to a full
+  building as the thread grows. A long-running thread gets a church, a windmill or a tower.
+- **Status at a glance** — a badge over each bot:
 
-2. Open http://localhost:5274 in your browser.
+  | Badge | Meaning |
+  |-------|---------|
+  | `?` blue | Waiting on your reply. Click to open the thread. |
+  | `!` red | The session hit an error. |
+  | `⚒` green | Running right now. |
+  | `✓` gold | Its pull request landed. |
+  | `z` grey | Nothing for three days. |
 
-Or run it as a desktop app:
+- **Subagents** are smaller bots, teal on the space planets and Minions on Medieval.
+- **Planets** — press `Tab` to change planet. **Medieval** is a KayKit hex island with a road,
+  a river and a castle, and its crew are skeletons whose cloth wears the repo's colour.
+- **Day and night** — press `L` for the time of day. At night the windows light up in each
+  plot's colour.
+- **Hide a repo** — keep a repo off the map without touching its threads. Show it again from
+  the list.
+
+### Chat and control
+
+- **Chat with any Claude Code thread** — select a bot and press `Enter`. The popup shows the
+  last turns, streams the reply as markdown, and shows each tool call on one line.
+- **New chat anywhere** — `C` or the **+** button. It starts in the selected repo, or in your
+  home folder when none is selected, and can move to any repo before the first message.
+- **Approvals in the page** — **Allow**, **Always allow** and **Deny** for tool calls, and the
+  options for Claude's questions. **Always allow** writes the rule to the project's
+  `.claude/settings.local.json`.
+- **Permission modes** per thread: **Ask**, **Plan**, **Auto-edit**, **Allow all** and
+  **Deny**. A change applies to the reply already running.
+- **Replies that keep going** — the reply runs on the server, so closing the popup, switching
+  thread or reloading the page does not stop it. Messages sent mid-reply wait in a queue and go
+  as one turn.
+- **Slash commands** — type `/` in the popup for the commands and skills of that thread.
+- **Search and files** — `/` on the map searches every thread, archived ones too. `⌘P` finds a
+  file in any repo and opens it beside the chat.
+- **Rename, archive, revive** — renaming a thread renames it in Claude Code too.
+
+### Orchestration: one plan, many repos
+
+Turn a ticket's plan into Claude Code sessions, one per repo, that work in parallel while an
+orchestrator chat reports back.
+
+1. **Run a plan** (sidebar) takes a `plan.md` path. Each `###` step under
+   `## Implementation steps` belongs to the repo named in backticks in its heading. Writing
+   "depends on step 1" orders the steps.
+2. The preview shows the repo sessions and their order. Pick a model for each (Opus 5.5 by
+   default), then start.
+3. The **orchestrator** opens as a chat. It starts the sessions, reads each report back to you,
+   and answers what the plan already answers.
+4. Each **repo session** works in its own git worktree, branched fresh from the remote default
+   branch, and commits on `share/<session>`. A session waits until the steps it depends on have
+   reported, then starts with their summaries.
+5. The **Orchestrations** tab lists every run. Fly to a session, or **Allow / Deny** a command it
+   is holding: pushes, PRs, deploys, databases. After 5 approved pushes for a repo, its sessions
+   push without asking.
+6. Nothing is approved or closed without you. Approved reports become shared notes in
+   `~/.claude/.store` that later sessions read.
+
+Over each bot in a run, a small pin sits on top of its status badge:
+
+| Pin | Who |
+|-----|-----|
+| Orange sitemap | The **orchestrator**, the main session of a run. One per plan. |
+| Violet branch | A **repo session**, a child of the orchestrator. One per repo in the plan. |
+
+The same runs work from the terminal:
 
 ```bash
-npm install && npm run app
+npm run share -- run plans/PROJ-1234-example.md --dry   # preview the sessions
+npm run share -- run plans/PROJ-1234-example.md         # start them
+npm run share -- status                               # every run
+npm run share -- report <session>
+npm run share -- resume <session> "answer or instruction"
+npm run share -- approve <session>
+npm run share -- close <session> "reason"
 ```
 
-- The app serves the colony on `127.0.0.1:5275`. Set `PORT` to use a different port.
-- Close the window to hide it. The colony keeps running, and the dock icon shows it again. Quit (⌘Q) stops it.
-- When a thread needs you and the window is in the background, you get a notification. Click it to go to the bot.
-- A link in the chat opens in a browser beside the chat, also for sites that a browser tab cannot frame (GitHub, Jira). Sign in once in that panel and you stay signed in. **Open ↗** opens the page in your own browser.
-- The app and the browser tab share one colony (`data/`). Chat modes, chat sizes, the open chat and the last plan go through `data/storage.json`. The first browser tab you open fills it, and after that the last change wins.
-- Each person runs the app on their own computer, with their own `claude` login. Nothing is shared.
+**Fresh loop** (`↻ pr-watch`, `↻ review-queue`) restarts a long-running skill in a new
+session. The skill's state, drafts and notes carry over.
 
-Other commands:
+### Desktop app
 
-- `npm start`: build the app and serve it. Use this to chat while you change the code.
-- `npm test`: run the tests.
+- `npm run app` opens the colony in its own window (Electron).
+- Closing the window hides it; the colony keeps running. `⌘Q` quits.
+- When a thread needs you and the window is in the background, you get a notification and a
+  dock badge. Click it to fly to that bot.
+- Links in the chat open in a browser panel beside it, including sites a browser tab cannot
+  frame, such as GitHub and Jira. **Open ↗** sends the page to your own browser.
+- The app and a browser tab share one colony (`data/`) and the same chat settings.
 
-The server listens only on `127.0.0.1`. Chat accepts requests only from this computer.
+### Keyboard
 
-## What this fork adds
+Press `?` in the app for the full sheet.
 
-### Chat with a thread
+| Key | Action |
+|-----|--------|
+| `C` | New chat |
+| `/` | Search every thread |
+| `⌘P` / `Ctrl+P` | Find a file in any repo |
+| `N` | Fly to the next thread that needs you |
+| `Enter` | Open the selected thread |
+| `V` / `A` | Mark viewed / archive |
+| `⌥N` / `Alt+N` | Next thread that needs you, from inside the chat |
+| `Esc` | Close the popup, or deselect |
+| `P` | Screenshot |
+| `H` / `⌘\` | Hide all UI |
+| `S` | Settings |
+| `?` | Help sheet |
+| drag / right-drag / scroll | Move / tilt / zoom to cursor |
+| arrows, `+` `−` | Move / zoom |
+| `0` | Reset view |
+| `O` | Orbit mode |
+| `Tab` | Change planet |
+| `L` | Time of day |
+| `M` | Mute |
 
-- Select a Claude Code bot. Click **Chat** or push Enter. The chat popup opens.
-- The popup shows the last turns of the thread.
-- The reply shows word by word. The popup shows markdown: headings, lists, code, tables and links.
-- You can select and copy text in the popup.
-- Each tool call shows on one line. Click the line to see the full command.
-- Type `/` to see the commands and skills for the thread.
-- Drag the corner of the popup to change its size. Each thread keeps its size.
+---
 
-### Approvals, questions and modes
+## Quick start
 
-- When Claude asks to use a tool, the popup shows **Allow**, **Always allow** and **Deny**.
-- **Always allow** writes the rule to `.claude/settings.local.json` in the project.
-- When Claude asks a question, the popup shows the options. Select an option, or type a different answer.
-- Select a permission mode for each thread: **Ask**, **Plan**, **Auto-edit**, **Allow all** or **Deny**.
-- A change of mode applies to the current reply immediately.
+You need **Node.js 22.13 or later**. Chat and orchestration also need the
+[Claude Code](https://claude.com/claude-code) CLI with a login.
 
-### Replies that continue
+```bash
+git clone https://github.com/wagejs/agents-of-empire.git
+cd agents-of-empire
+npm install
 
-- The reply runs on the server, not in the page.
-- If you close the popup, open a different thread or reload the page, the reply continues.
-- After a reload, the popup opens again at the same thread.
-- Background subagents send their results to the same reply.
-- You can send a message while Claude works. The message waits in a queue.
-- When the reply stops, Claude gets all queued messages as one turn.
-- Click **Stop** to stop the reply. The queued messages go immediately.
+npm run dev   # browser, with live reload → http://localhost:5274
+npm run app   # or the desktop app        → serves on 127.0.0.1:5275
+```
 
-### Threads
+The server listens on `127.0.0.1` only, and chat answers requests from this computer only.
+Chat uses your own `claude` CLI and its login; nothing goes to another service.
 
-- Click **New conversation** to start a Claude Code thread from the page. Select the repo, or type a folder.
-- Click the title on the thread card to rename the thread. Claude Code gets the new name too.
-- Push ⌥N in the popup to go to the next thread that needs you.
-- Push `/` on the map to search all threads. Archive idle threads, or revive archived threads.
-- Subagents show as small teal bots. They have no actions.
+### What it reads
 
-### Status and settings
+Agents of Empire asks every harness on the machine for its threads and draws what comes back.
+It never writes to a harness. Its own files are:
 
-- The **working** status uses the busy flag that Claude Code writes. An idle thread does not show as working.
-- Long transcripts show their correct title.
-- Click **Save as Mine** to keep your quality settings. Click **Mine** to use them again.
+| Path | What |
+|------|------|
+| `data/colony.json` | Layout, archived and hidden repos, settings |
+| `data/storage.json` | Chat modes, sizes, the open chat and the last plan, shared by app and browser |
+| `~/.claude/.store/` | Orchestration notes, briefs, reports and approvals |
 
-### Medieval planet
-
-- Push Tab to change the planet. **Medieval** is after Terra.
-- The colony is an island of KayKit hex tiles in the sea. Each plot stands on grass tiles.
-- A road goes around the town. A river goes across the island to the sea. Trees, rocks, hills and mountains stand on the outer tiles.
-- The bots come out of a castle, not a spaceship.
-- The bots are skeletons. A subagent is a Minion. A main thread is a Rogue, a Warrior or a Mage. The same thread always gets the same skeleton.
-- The eyes of a skeleton show the status colour.
-- The building of a thread grows from scaffolding to a full building. The colour of the building shows the status. An idle building is grey.
-- A thread that runs for a long time gets a church, a windmill or a great tower.
-- In **Settings → Planet**, select **Start on** to open the page on the same planet each time.
+Adding a harness is one file in [`server/harnesses/`](server/harnesses/README.md) plus one line
+in its `index.mjs`.
 
 ### Paint the Medieval map
 
-1. Run `npm run dev`. Open http://localhost:5274/tools/map-editor.html.
-2. Select a paint: sea, grass, road, river, trees, rocks, hills or mountain. Drag on the tiles.
-3. You paint only the type of each tile. The editor selects the correct road, river and coast tile.
-4. A red tile has no correct tile. A river needs two ends: a different river tile or the sea. A road needs a road next to it.
-5. Select **Live preview in the game** to see the map in the open game tab.
-6. Click **Save**. Put `medieval.json` in `public/maps/`. The game uses this map. If there is no map, the game makes an island.
+1. Run `npm run dev`, then open http://localhost:5274/tools/map-editor.html.
+2. Pick a paint (sea, grass, road, river, trees, rocks, hills, mountain) and drag on the tiles.
+   The editor picks the right road, river and coast pieces.
+3. Click **Save** and put `medieval.json` in `public/maps/`. Without it, the game makes an island.
 
-The plots always stand on grass. The castle tile does not change.
+---
 
+## Configuration
 
-- Chat accepts requests only from this computer.
-- Chat uses your own `claude` CLI and its login. Nothing goes to a different service.
+### Environment variables
 
-## Licence
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `5274` (`npm run serve`), `5275` (app) | Port to serve on |
+| `AGENTS_OF_EMPIRE_HOST` | `127.0.0.1` | Interface to bind. Chat stays loopback-only regardless |
+| `AGENTS_OF_EMPIRE_DATA` | `./data` | Where `colony.json` and `storage.json` live |
+| `AGENTS_OF_EMPIRE_STORE` | `~/.claude/.store` | Orchestration store |
+| `AGENTS_OF_EMPIRE_REPOS` | `~/projects` | Folder whose git checkouts plans run against |
+| `AGENTS_OF_EMPIRE_FILES_ROOT` | `~/projects` | Folder `⌘P` searches |
+| `AGENTS_OF_EMPIRE_TERMINAL` | `$TERMINAL`, then the desktop's own | Terminal used to resume a thread |
+| `AGENTS_OF_EMPIRE_CLAUDE_DESKTOP` | Claude desktop app's session store | Override for that store |
+| `AGENTS_OF_EMPIRE_CURSOR_PROJECTS` | `~/.cursor/projects` | Cursor's projects folder |
+| `AGENTS_OF_EMPIRE_ANTIGRAVITY_HOME` | Antigravity's data folder | Override for that folder |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code's config folder, as Claude Code reads it |
 
-This fork uses the [MIT licence](LICENSE), the same as the original project.
+`AGENTS_OF_EMPIRE_REPOS` and `AGENTS_OF_EMPIRE_FILES_ROOT` default to the author's workspace;
+point them at your own.
+
+---
+
+## Routes
+
+All under `/api`, served by [`server/api.mjs`](server/api.mjs).
+
+| Method / path | Purpose |
+|---------------|---------|
+| `GET /api/threads` | Every thread from every harness |
+| `GET /api/harnesses` | Harnesses found on this machine |
+| `GET` · `PUT /api/state` | The colony's saved state |
+| `GET` · `POST /api/storage` | The page's own storage, mirrored for the desktop app |
+| `POST /api/open` · `/api/new-session` · `/api/reveal` | Open a thread, start one in a harness, show a folder |
+| `POST /api/chat/*` | **Loopback only.** `new`, `send`, `stop`, `messages`, `attach`, `permission`, `mode`, `model`, `rename`, `commands`, `loop`, `prs`, `link`, `file` |
+| `POST /api/files/*` · `GET /api/files/image` | `list`, `read`, `grep`, `open` and images for the file finder |
+| `POST /api/share/*` | `preview`, `start`, `report`, `answer`, `exercise` for orchestration |
+
+---
+
+## Project structure
+
+| Path | Purpose |
+|------|---------|
+| `src/main.js` | Page entry: wires the world, the HUD, chat and the keyboard |
+| `src/world/` | Planets, terrain, hex board, buildings, plots, sky |
+| `src/agents/` | Bots: astronauts, skeletons, faces, badges, picking |
+| `src/game/` | Colony state, roster, search, hidden repos |
+| `src/ui/` | Sidebar, chat popup, plan panel, file finder, help sheet |
+| `server/serve.mjs` · `server/api.mjs` | HTTP server and API |
+| `server/harnesses/` | One adapter per harness |
+| `server/chat.mjs` | Claude Code chat runs, via the Agent SDK |
+| `server/plan.mjs` · `server/orchestrator.mjs` · `server/conductor.mjs` | Plan parsing, repo sessions, the orchestrator chat |
+| `server/store.mjs` · `server/permit.mjs` | Shared notes store, command approvals |
+| `electron/` | Desktop shell |
+| `tools/` | Asset build, map editor, render checks, `share` CLI |
+| `test/` | `node:test` suites |
+
+Why things are the way they are: [DECISIONS.md](DECISIONS.md). How to help:
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## Tests
+
+```bash
+npm test     # node --test, no browser needed
+npm run build
+```
+
+---
+
+## Credits
+
+### Bot Crossing
+
+Agents of Empire is a fork of [Bot Crossing](https://github.com/jarrenrocks/bot-crossing)
+([botcrossing.com](https://botcrossing.com)) by Jarren Rocks. Thank you, Jarren, for the colony,
+the bots and the harness adapters. The name **Bot Crossing** and character designs made after
+16 September 2026 stay with Jarren Rocks; see [TRADEMARKS.md](TRADEMARKS.md). This fork uses a
+different name for that reason.
+
+### Assets
+
+The 3D art in `public/assets/` is CC0, by Kay Lousberg and Kenney. The Medieval planet uses the
+KayKit Medieval Hexagon Pack and the KayKit Skeletons pack. See
+[CREDITS.md](public/assets/CREDITS.md). The status icons are
+[Material Design Icons](https://pictogrammers.com/library/mdi/), under Apache-2.0.
+
+---
+
+## License
+
+[MIT](LICENSE), the same as the original project.
 
 - Copyright © 2026 Jarren Rocks, for Bot Crossing.
 - Copyright © 2026 Muhammad Wage Juli Saputra, for the changes in this fork.
 
-The name **Bot Crossing** and new character designs stay with Jarren Rocks. Refer to
-[TRADEMARKS.md](TRADEMARKS.md). This fork uses a different name for this reason.
-
-The 3D art in `public/assets/` is CC0, by Kay Lousberg and Kenney. The Medieval planet uses the
-KayKit Medieval Hexagon Pack and the KayKit Skeletons pack. Refer to
-[CREDITS.md](public/assets/CREDITS.md). The status icons are
-[Material Design Icons](https://pictogrammers.com/library/mdi/), under the Apache-2.0 licence.
-
-This fork is not affiliated with Anthropic, OpenAI, Google or the other harness vendors.
+Not affiliated with Anthropic, OpenAI, Google or the other harness vendors.
