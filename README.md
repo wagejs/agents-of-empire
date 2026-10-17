@@ -1,4 +1,4 @@
-# agents-world
+# Agents of Empire
 
 A fork of [Bot Crossing](https://github.com/jarrenrocks/bot-crossing) by Jarren Rocks
 ([@jarrenrocks](https://github.com/jarrenrocks)). Bot Crossing shows each coding-agent thread on

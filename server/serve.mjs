@@ -61,6 +61,6 @@ export async function handle(req, res) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   http.createServer(handle).listen(PORT, HOST, () => {
-    console.log(`agents-world → http://${HOST}:${PORT}`)
+    console.log(`Agents of Empire → http://${HOST}:${PORT}`)
   })
 }

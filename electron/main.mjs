@@ -19,7 +19,7 @@ const ORIGIN = `http://127.0.0.1:${PORT}`
 const isWeb = (url) => /^https?:\/\//i.test(String(url))
 const cap = (s, n) => String(s ?? '').slice(0, n)
 
-app.setName('agents-world')
+app.setName('Agents of Empire')
 if (!app.requestSingleInstanceLock()) app.quit()
 
 let win = null
@@ -46,7 +46,7 @@ function linkView() {
   if (view) return view
   const ses = session.fromPartition('persist:links')
   // A plain Chrome user agent: some sign-in pages refuse anything that says Electron.
-  ses.setUserAgent(app.userAgentFallback.replace(/\s(?:Electron|agents-world|bot-crossing)\/\S+/g, ''))
+  ses.setUserAgent(app.userAgentFallback.replace(/\s(?:Electron|Agents of Empire|bot-crossing)\/\S+/g, ''))
   allowOnly(ses, ['clipboard-sanitized-write', 'fullscreen'])
   view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true } })
   const wc = view.webContents
@@ -82,7 +82,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
-    title: 'agents-world',
+    title: 'Agents of Empire',
     backgroundColor: '#0b0f17',
     webPreferences: { preload: path.join(here, 'preload.cjs'), backgroundThrottling: false },
   })
@@ -157,7 +157,7 @@ app.on('before-quit', () => (quitting = true))
 app.whenReady().then(() => {
   const server = http.createServer(handle)
   server.on('error', (err) => {
-    dialog.showErrorBox('agents-world', err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Quit what holds it, or start with PORT=<another port>.` : String(err.message))
+    dialog.showErrorBox('Agents of Empire', err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Quit what holds it, or start with PORT=<another port>.` : String(err.message))
     app.exit(1)
   })
   server.listen(PORT, '127.0.0.1', createWindow)
