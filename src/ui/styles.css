@@ -2757,6 +2757,27 @@ kbd {
   padding: 0 9px;
 }
 
+.side .loop-list {
+  display: contents;
+}
+
+.side .loop-remove {
+  margin-left: 6px;
+  opacity: 0.45;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.side .loop-remove:hover {
+  opacity: 1;
+}
+
+.side .loop-add {
+  height: 26px;
+  font-size: 12px;
+  max-width: 100%;
+}
+
 /* Starting a shared run: under Fresh loop, above the Repos / Orchestrations tabs it fills. */
 .side .plan-bar {
   padding: 0 14px 10px;

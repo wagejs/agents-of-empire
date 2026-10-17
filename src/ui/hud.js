@@ -452,6 +452,7 @@ export class Hud {
     this.avatarTmp.height = 108
     this.avatarTmpCtx = this.avatarTmp.getContext('2d')
     this._avatarState = { frame: -1, color: '' }
+    this._loops = { skills: [], available: [] }
   }
 
   _wire() {
@@ -498,16 +499,29 @@ export class Hud {
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-follow', 'click', () => this.settings.set('followSelected', !this.settings.get('followSelected')))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
-    for (const b of this.el.querySelectorAll('[data-loop]')) {
-      b.addEventListener('click', async () => {
-        b.disabled = true
-        try {
-          await this.actions.freshLoop?.(b.dataset.loop)
-        } finally {
-          b.disabled = false
-        }
-      })
-    }
+    // The row is redrawn from the saved list, so its clicks are delegated.
+    const loops = this.$('.loops')
+    loops.addEventListener('click', async (e) => {
+      const remove = e.target.closest('[data-loop-remove]')
+      if (remove) return this.actions.saveLoops?.(this._loops.skills.filter((s) => s !== remove.dataset.loopRemove))
+      const b = e.target.closest('[data-loop]')
+      if (!b) return
+      b.disabled = true
+      try {
+        await this.actions.freshLoop?.(b.dataset.loop)
+      } finally {
+        b.disabled = false
+      }
+    })
+    const pick = this.$('.loop-add')
+    on('.loop-add-btn', 'click', () => {
+      pick.hidden = !pick.hidden
+      if (!pick.hidden) pick.focus()
+    })
+    pick.addEventListener('change', () => {
+      if (pick.value) this.actions.saveLoops?.([...this._loops.skills, pick.value])
+      pick.hidden = true
+    })
     on('#btn-reveal', 'click', () => this.actions.revealProject?.())
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
     on('#btn-hide-project', 'click', () => this.actions.hideProject?.())
@@ -635,11 +649,35 @@ export class Hud {
    * Which the sidebar shows: the repos (the list, or one repo drilled into), or the shared
    * runs and their sessions. The tabs sit above both, so they are there wherever you are.
    */
-  /** Fresh loop buttons only for the loop skills installed here; no row at all without one. */
-  showLoops(skills) {
-    const row = this.$('.loops')
-    for (const b of row.querySelectorAll('[data-loop]')) b.hidden = !skills.includes(b.dataset.loop)
-    row.hidden = !skills.length
+  /**
+   * The Fresh loop row: a button per chosen skill, each with a × to take it out, and + to add any
+   * other skill installed in ~/.claude/skills.
+   */
+  showLoops({ skills = [], available = [] } = {}) {
+    this._loops = { skills, available }
+    const list = this.$('.loop-list')
+    list.replaceChildren(
+      ...skills.map((skill) => {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'btn loop'
+        b.dataset.loop = skill
+        b.textContent = `↻ ${skill}`
+        const x = document.createElement('span')
+        x.className = 'loop-remove'
+        x.dataset.loopRemove = skill
+        x.title = `Remove ${skill} from Fresh loop`
+        x.textContent = '×'
+        b.append(x)
+        return b
+      })
+    )
+    const pick = this.$('.loop-add')
+    pick.replaceChildren(new Option('Add a loop…', ''), ...available.map((s) => new Option(s, s)))
+    pick.hidden = true
+    const add = this.$('.loop-add-btn')
+    add.disabled = !available.length
+    add.title = available.length ? 'Add a skill from ~/.claude/skills as a loop' : 'No other skills in ~/.claude/skills to add'
   }
 
   showTab(name) {
@@ -1312,10 +1350,11 @@ const TEMPLATE = `
 
   <div class="stats"></div>
 
-  <div class="loops" hidden title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
+  <div class="loops" title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
     <span class="loops-label">Fresh loop</span>
-    <button type="button" class="btn" data-loop="pr-watch">↻ pr-watch</button>
-    <button type="button" class="btn" data-loop="review-queue">↻ review-queue</button>
+    <span class="loop-list"></span>
+    <button type="button" class="btn ghost loop-add-btn" title="Add a skill from ~/.claude/skills as a loop">+</button>
+    <select class="loop-add" hidden aria-label="Skill to add as a loop"></select>
   </div>
 
   <div class="plan-bar">
@@ -1463,7 +1502,7 @@ const TEMPLATE = `
       <div class="legend-row"><i class="badge pin" style="background:#3a2412;color:#f0a35a"><svg viewBox="0 0 24 24"><path fill="currentColor" d="${mdiSitemap}"/></svg></i> <span><b>Orchestrator</b>, the main session of a run. One per plan; it lives in <code>~/.claude</code>, so it stands in that zone.</span></div>
       <div class="legend-row"><i class="badge pin" style="background:#211d3d;color:#a79cf0"><svg viewBox="0 0 24 24"><path fill="currentColor" d="${mdiSourceBranch}"/></svg></i> <span><b>Repo session</b>, a child of the orchestrator. One per repo in the plan, standing in that repo's zone.</span></div>
       <p class="sub">The small pin sits on top of the status badge, so a child that is waiting on you shows both: the branch over the <b>?</b>.</p>
-      <p class="sub"><b>Fresh loop</b> (↻ pr-watch, ↻ review-queue) restarts that skill in a new session. Its state, drafts and notes carry over.</p>
+      <p class="sub"><b>Fresh loop</b> restarts a skill in a new session, keeping its state. <b>+</b> adds one, <b>×</b> removes it.</p>
     </div>
     <div class="badges">
       <h3>Status badges</h3>

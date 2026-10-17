@@ -7,7 +7,7 @@ import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { previewLink, withPrStatus } from './link.mjs'
 import { grepFiles, listFiles, openInEditor, readFile, readImage } from './files.mjs'
-import { freshLoop, installedLoops, LOOP_SKILLS } from './loops.mjs'
+import { freshLoop, loopStatus, writeLoops } from './loops.mjs'
 import { readMarkdown } from './mdfile.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { shareRoles, shareRoute } from './conductor.mjs'
@@ -26,6 +26,8 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = process.env.AGENTS_OF_EMPIRE_DATA || path.join(here, '..', 'data')
 const STATE_FILE = path.join(DATA_DIR, 'colony.json')
+/** The skills in the Fresh loop row, chosen on the page. */
+const LOOPS_FILE = path.join(DATA_DIR, 'loops.json')
 
 /**
  * The page's own browser storage (chat modes and sizes, the open chat, the last plan), mirrored
@@ -541,10 +543,16 @@ async function chat(pathname, req, res) {
     return send(res, file.ok ? 200 : 404, file)
   }
 
-  /** Stop the session running /pr-watch or /review-queue and start that skill afresh. */
+  /** Which installed skills sit in the Fresh loop row. Only installed skills are kept. */
+  if (pathname === '/api/chat/loops') {
+    writeLoops(LOOPS_FILE, body.skills)
+    return send(res, 200, { ok: true, ...loopStatus(LOOPS_FILE) })
+  }
+
+  /** Stop the session running a loop skill and start that skill afresh. */
   if (pathname === '/api/chat/loop') {
     const skill = String(body.skill || '')
-    if (!LOOP_SKILLS.includes(skill)) return send(res, 400, { ok: false, error: 'Not a loop skill' })
+    if (!loopStatus(LOOPS_FILE).skills.includes(skill)) return send(res, 400, { ok: false, error: 'Not a loop skill' })
     try {
       const fresh = await freshLoop({ skill, oldSessionId: String(body.oldSessionId || '') })
       return send(res, 200, { ok: true, ...fresh })
@@ -631,7 +639,7 @@ export async function apiMiddleware(req, res, next) {
     }
 
     if (url.pathname === '/api/loops' && req.method === 'GET') {
-      return send(res, 200, { skills: installedLoops() })
+      return send(res, 200, loopStatus(LOOPS_FILE))
     }
 
     if (url.pathname === '/api/harnesses' && req.method === 'GET') {

@@ -143,9 +143,23 @@ npm run share -- approve <session>
 npm run share -- close <session> "reason"
 ```
 
-**Fresh loop** (`↻ pr-watch`, `↻ review-queue`) restarts a long-running skill in a new
-session. The skill's state, drafts and notes carry over. A button shows only when that skill is
-installed in `~/.claude/skills/`; with neither installed, the row is hidden.
+#### Fresh loop
+
+For skills that run all day on a schedule, such as a PR review queue or an inbox digest. Each
+loop gets a **↻** button in the sidebar that stops every session running that skill and starts
+it again in a new one. The skill's state, drafts and notes carry over; the old conversation
+does not.
+
+- **+** adds any skill installed in `~/.claude/skills/` as a loop. **×** on a button removes it.
+- The list is saved in the app's data folder (`data/loops.json`), not in your environment.
+- Pressing **↻** asks first, then starts `/<skill> start` in `~/.claude` in **Allow all** mode,
+  and hands the new session the old transcript in case a round was cut off half way.
+
+A skill works as a loop when it:
+
+1. lives in `~/.claude/skills/<name>/SKILL.md`;
+2. accepts `start` as its argument to begin the loop, typically by scheduling its own next run;
+3. keeps its state in files, so a fresh session can pick up where the last one stopped.
 
 ### Desktop app ✨
 
@@ -349,11 +363,11 @@ All under `/api`, served by [`server/api.mjs`](server/api.mjs).
 |---------------|---------|
 | `GET /api/threads` | Every thread from every harness |
 | `GET /api/harnesses` | Harnesses found on this machine |
-| `GET /api/loops` | Loop skills installed, for the Fresh loop buttons |
+| `GET /api/loops` | The Fresh loop row's skills, and the installed skills it could add |
 | `GET` · `PUT /api/state` | The colony's saved state |
 | `GET` · `POST /api/storage` | The page's own storage, mirrored for the desktop app |
 | `POST /api/open` · `/api/new-session` · `/api/reveal` | Open a thread, start one in a harness, show a folder |
-| `POST /api/chat/*` | **Loopback only.** `new`, `send`, `stop`, `messages`, `attach`, `permission`, `mode`, `model`, `rename`, `commands`, `loop`, `prs`, `link`, `file` |
+| `POST /api/chat/*` | **Loopback only.** `new`, `send`, `stop`, `messages`, `attach`, `permission`, `mode`, `model`, `rename`, `commands`, `loop`, `loops`, `prs`, `link`, `file` |
 | `POST /api/files/*` · `GET /api/files/image` | `list`, `read`, `grep`, `open` and images for the file finder |
 | `POST /api/share/*` | `preview`, `start`, `report`, `answer`, `exercise` for orchestration |
 

@@ -531,14 +531,25 @@ test('a fresh loop is named once its transcript exists, and says so when it neve
   assert.equal(renamed.length, 1, 'nothing renamed that is not there')
 })
 
-test('installedLoops lists only the loop skills installed as personal skills', async () => {
-  const { installedLoops } = await import('../server/loops.mjs')
+test('the Fresh loop row: defaults until edited, only installed skills, add and remove', async () => {
+  const { loopStatus, readLoops, writeLoops, DEFAULT_LOOPS } = await import('../server/loops.mjs')
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-skills-'))
+  const file = path.join(dir, 'data', 'loops.json')
+  const skill = (name) => fsp.mkdir(path.join(dir, name), { recursive: true }).then(() => fsp.writeFile(path.join(dir, name, 'SKILL.md'), '# x'))
   try {
-    assert.deepEqual(installedLoops(dir), [])
-    await fsp.mkdir(path.join(dir, 'review-queue'), { recursive: true })
-    await fsp.writeFile(path.join(dir, 'review-queue', 'SKILL.md'), '# x')
-    assert.deepEqual(installedLoops(dir), ['review-queue'])
+    // Nothing saved yet: the defaults, shown only when installed.
+    assert.deepEqual(readLoops(file), DEFAULT_LOOPS)
+    assert.deepEqual(loopStatus(file, dir), { skills: [], available: [] })
+    await skill('review-queue')
+    await skill('daily-digest')
+    await fsp.mkdir(path.join(dir, 'not-a-skill'))
+    assert.deepEqual(loopStatus(file, dir), { skills: ['review-queue'], available: ['daily-digest'] })
+    // Adding keeps order; a skill that is not installed, or not a name, is dropped.
+    assert.deepEqual(writeLoops(file, ['review-queue', 'daily-digest', 'ghost', '../etc'], dir), ['review-queue', 'daily-digest'])
+    assert.deepEqual(loopStatus(file, dir), { skills: ['review-queue', 'daily-digest'], available: [] })
+    // Removing them all is remembered, not reset to the defaults.
+    writeLoops(file, [], dir)
+    assert.deepEqual(loopStatus(file, dir), { skills: [], available: ['daily-digest', 'review-queue'] })
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

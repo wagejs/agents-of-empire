@@ -37,6 +37,7 @@ import {
   chatFreshLoop,
   shareAnswer,
   fetchLoops,
+  saveLoops,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
@@ -337,6 +338,15 @@ const actions = {
    * skill starts again in a new session that picks up its state from disk. It runs in Allow all,
    * so a tick reads and pulls PRs without waiting on you; its questions to you still wait.
    */
+  /** The Fresh loop row's skills, chosen on the page and kept in the app's data folder. */
+  saveLoops: async (skills) => {
+    try {
+      hud.showLoops(await saveLoops(skills))
+    } catch (err) {
+      hud.toast(err.message, 'err')
+    }
+  },
+
   freshLoop: async (skill) => {
     const old = threads
       .filter((t) => t.title === skill && !t.archived && t.canChat)
@@ -406,7 +416,7 @@ ambience.setPlanet(colony.planet)
 colony.onSound = (name, x, y, z) => ambience.play(name, { x, y, z, kind: colony.fauna.flock?.kind })
 
 const hud = new Hud(app, settings, actions)
-fetchLoops().then((skills) => hud.showLoops(skills))
+fetchLoops().then((loops) => hud.showLoops(loops))
 
 /**
  * A reply moves its thread on, so the colony is refreshed once each one ends. A reply you just

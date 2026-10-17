@@ -17,16 +17,57 @@ import path from 'node:path'
 import { activeRun, queueMessage, renameThread, startChat, stopRun } from './chat.mjs'
 import { newChatThread } from './harnesses/claude-code.mjs'
 
-export const LOOP_SKILLS = ['pr-watch', 'review-queue']
+/** What the Fresh loop row holds until someone edits it from the page. */
+export const DEFAULT_LOOPS = ['pr-watch', 'review-queue']
+/** A skill name as Claude Code accepts it: what a `/` command and a folder name can both be. */
+const SKILL_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i
 
 const HOME = os.homedir()
 /** Where both skills have always run: Claude Code's own folder. */
 const LOOP_CWD = path.join(HOME, '.claude')
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'projects')
 
-/** The loop skills installed as personal skills here. Only those get a Fresh loop button. */
-export const installedLoops = (dir = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'skills')) =>
-  LOOP_SKILLS.filter((skill) => fs.existsSync(path.join(dir, skill, 'SKILL.md')))
+const SKILLS_DIR = () => path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'skills')
+
+/** Every personal skill installed here, by folder name: the ones the page may offer as loops. */
+export function installedSkills(dir = SKILLS_DIR()) {
+  let names = []
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return []
+  }
+  return names.filter((n) => SKILL_NAME.test(n) && fs.existsSync(path.join(dir, n, 'SKILL.md'))).sort()
+}
+
+/** The loops chosen on the page, kept in the app's data folder; the defaults until first edited. */
+export function readLoops(file) {
+  try {
+    const skills = JSON.parse(fs.readFileSync(file, 'utf8')).skills
+    if (Array.isArray(skills)) return [...new Set(skills.map(String).filter((s) => SKILL_NAME.test(s)))]
+  } catch {
+    /* no file yet, or unreadable: the defaults */
+  }
+  return [...DEFAULT_LOOPS]
+}
+
+/** Save the row's loops. Only installed skills are kept, in the order given. */
+export function writeLoops(file, skills, dir = SKILLS_DIR()) {
+  const installed = new Set(installedSkills(dir))
+  const kept = [...new Set((Array.isArray(skills) ? skills : []).map(String))].filter((s) => installed.has(s))
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify({ skills: kept }, null, 2))
+  fs.renameSync(tmp, file)
+  return kept
+}
+
+/** The row as the page draws it: loops that are installed, and the installed skills it could add. */
+export function loopStatus(file, dir = SKILLS_DIR()) {
+  const installed = installedSkills(dir)
+  const skills = readLoops(file).filter((s) => installed.includes(s))
+  return { skills, available: installed.filter((s) => !skills.includes(s)) }
+}
 
 const until = async (test, ms, step = 250) => {
   for (const end = Date.now() + ms; Date.now() < end; ) {
@@ -75,7 +116,7 @@ export const LOOP_MODE = 'bypassPermissions'
 export function loopRuns(skill) {
   const runs = globalThis[Symbol.for('agents-of-empire.chat')]?.runs?.values() || []
   return [...runs].filter(
-    (run) => !run.done && (run.loop === skill || new RegExp(`^/${skill}(\\s|$)`).test(String(run.prompt || '').trim()))
+    (run) => !run.done && (run.loop === skill || new RegExp(`^/${skill.replace(/[.]/g, '\\.')}(\\s|$)`).test(String(run.prompt || '').trim()))
   )
 }
 
@@ -105,7 +146,7 @@ export async function nameSession(sessionId, title, { rename = renameThread, wai
  * test hands in its own.
  */
 export async function freshLoop({ skill, oldSessionId = '' }, { start = startChat, name = nameSession } = {}) {
-  if (!LOOP_SKILLS.includes(skill)) throw new Error(`Not a loop skill: ${skill}`)
+  if (!SKILL_NAME.test(String(skill))) throw new Error(`Not a loop skill: ${skill}`)
   // Every session running this skill stops, not just the one the page knew to name: two live
   // sessions mean two timers ticking.
   const old = loopRuns(skill)
