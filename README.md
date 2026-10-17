@@ -189,6 +189,96 @@ in its `index.mjs`.
 
 ---
 
+---
+
+## Make your own planet
+
+A planet is a preset of colours and switches. Terrain, scatter, sky, water, weather, wildlife,
+sound and lighting all read from it. There are two levels:
+
+| You want | You change | Effort |
+|----------|------------|--------|
+| A new look, using the existing buildings and crew | One entry in `src/world/planet.js` | Minutes, data only |
+| Your own buildings, crew or tiles, like Medieval | Asset build, kit loader, building and crew code | A real feature |
+
+### Level 1: a new look (data only)
+
+1. In [`src/world/planet.js`](src/world/planet.js), add an entry to `PLANETS`. Copying `terra`
+   is the easiest start. This is a complete one:
+
+   ```js
+   dusk: {
+     id: 'dusk',                 // must match the key
+     name: 'Dusk',               // shown in the planet picker
+     blurb: 'Violet hills under a low orange sun.',
+     ground: { low: 0x3a2f5a, high: 0x8a6fb0, tint: 0xb79ad8 },
+     rock: 0x5a5470,
+     horizon: 0xe08a6a,
+     sky: { top: 0x2a1f4f, bottom: 0xf0a070 },
+     fog: { color: 0x9a7a9a, near: 92, far: 230 },
+     sun: { color: 0xffc89a, intensity: 2.2, night: 0.13 },
+     ambient: { sky: 0xc8a0d8, ground: 0x3a2f4a, intensity: 0.9 },
+     atmosphere: 1,              // 0 for an airless sky
+     craters: 0,
+     roughness: 0.8,
+     dust: 0.2,
+     companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
+     scatter: 'sakura',
+     weather: [{ kind: 'petals', rate: 0.4 }],
+     grade: { saturation: 1.05, warmth: 0.08 },
+   },
+   ```
+
+2. Add its id to `PLANET_ORDER` in the same file. That is the order `Tab` cycles through, and
+   the list in **Settings → Planet**.
+3. Run `npm run dev` and press `Tab` until it shows. To check it on made-up threads, open
+   http://localhost:5274/tools/visual-check.html?planet=dusk and wait for `"complete": true`.
+
+![The Dusk example planet, made from the entry above](docs/custom-planet.png)
+
+Every field in the example is **required**; leave one out and the page stops loading. The rest
+are optional and add to it:
+
+| Field | Values |
+|-------|--------|
+| `shape` | `plain`, `island`, `coast`, `dunes`, `sky` (a floating island) |
+| `water` | `{ level, shallow, deep, foam, waveHeight, sparkle }`, a sea, lakes or lava |
+| `shore` | `{ color, band }`, the sand above the waterline |
+| `scatter` | What grows outside the colony: `flora`, `rocks`, `desert`, `jungle`, `beach`, `ocean`, `tundra`, `volcanic`, `autumn`, `sakura` |
+| `weather` | `[{ kind, rate }]`, with `kind` one of `pollen`, `fireflies`, `petals`, `leaves`, `snow`, `sand`, `ash`, `embers`, `spray`, `dust` |
+| `clouds` | `{ amount, color, speed }` |
+| `grass` | `{ root, tip, height, width, sway }` |
+| `fauna` | `{ birds, butterflies, fish, drones }`. Copy one from an existing planet. |
+| `audio` | `{ beds, events }`, by the sound names in [`src/audio/sounds.js`](src/audio/sounds.js) |
+| `grade` | `{ saturation, warmth }`, a nudge to the colour grade |
+
+The thirteen built-in planets in the same file are working examples of every field.
+
+### Level 2: your own buildings and crew
+
+This is how Medieval was made; its commit, `ba30463`, is the worked example to follow.
+
+1. **Get a pack you may redistribute.** CC0 packs, such as KayKit or Kenney, are safe to
+   commit. Unpack it under `assets-src/`, which git ignores.
+2. **Pack it into one glb.** Add a step to [`tools/build-assets.mjs`](tools/build-assets.mjs)
+   that runs `tools/build-kit.mjs <gltf-dir> public/assets/<name>.glb [model,model,...]`. It
+   merges a pack of single-model glTF files that share one atlas into one file with one texture.
+   Commit the built glb, so a fresh clone works without the pack.
+3. **Register the kit.** Add `<name>: { file: '<name>.glb', ... }` to the kit list in
+   [`src/world/kit.js`](src/world/kit.js). Parts are then looked up with `part(model, '<name>')`.
+4. **Use it from the planet.** Three switches on the preset pull in a pack:
+   - `buildings: 'medieval'` swaps the building look. See `medievalLook` in
+     [`src/world/buildings.js`](src/world/buildings.js) and its use in
+     [`src/game/colony.js`](src/game/colony.js). A new set needs its own branch there.
+   - `crew: 'skeletons'` swaps the bots. See [`src/agents/skeletons.js`](src/agents/skeletons.js):
+     characters rigged to the crew's skeleton can play its animations as they are.
+   - `board: true` lays the ground in hex tiles. See [`src/world/hexboard.js`](src/world/hexboard.js)
+     and the map editor above.
+5. **Credit it.** Add the pack and its licence to
+   [`public/assets/CREDITS.md`](public/assets/CREDITS.md).
+6. **Check it.** Run `npm test`, then `tools/visual-check.html?planet=<id>` and
+   `tools/render-check.html`.
+
 ## Configuration
 
 ### Environment variables
