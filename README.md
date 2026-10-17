@@ -21,9 +21,9 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 
 - [What you get](#what-you-get)
   - [The colony](#the-colony)
-  - [Chat and control](#chat-and-control)
-  - [Orchestration: one plan, many repos](#orchestration-one-plan-many-repos)
-  - [Desktop app](#desktop-app)
+  - [Chat and control ✨](#chat-and-control-)
+  - [Orchestration: one plan, many repos ✨](#orchestration-one-plan-many-repos-)
+  - [Desktop app ✨](#desktop-app-)
   - [Keyboard](#keyboard)
 - [Quick start](#quick-start)
   - [What it reads](#what-it-reads)
@@ -45,15 +45,18 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 
 ## What you get
 
+> 🌱 from [Bot Crossing](https://github.com/jarrenrocks/bot-crossing), the project this forks ·
+> ✨ added in Agents of Empire
+
 ### The colony
 
-- **Every thread is a bot** — Claude Code, Codex CLI, OpenCode, Cursor, Antigravity, Kilo Code
+- 🌱 **Every thread is a bot** — Claude Code, Codex CLI, OpenCode, Cursor, Antigravity, Kilo Code
   and Hermes threads all appear, from whichever of them is on the machine.
-- **Every repo is a plot** — each repo gets a zone and a colour. Its bots, buildings and
-  name share that colour, so one repo reads as one group at a glance.
-- **Buildings grow with the work** — a thread's building rises from scaffolding to a full
-  building as the thread grows. A long-running thread gets a church, a windmill or a tower.
-- **Status at a glance** — a badge over each bot:
+- 🌱 **Every repo is a plot** — each repo gets a zone and a colour. Its buildings and name
+  share that colour, so one repo reads as one group at a glance.
+- 🌱 **Buildings grow with the work** — a thread's building rises from scaffolding to a full
+  building as the thread grows.
+- 🌱 **Status at a glance** — a badge over each bot:
 
   | Badge | Meaning |
   |-------|---------|
@@ -63,18 +66,21 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
   | `✓` gold | Its pull request landed. |
   | `z` grey | Nothing for three days. |
 
-- **Subagents** are smaller bots, teal on the space planets and Minions on Medieval.
-- **Planets** — press `Tab` to change planet. **Medieval** is a KayKit hex island with a road,
-  a river and a castle, and its crew are skeletons whose cloth wears the repo's colour.
+- 🌱 **Subagents** are smaller bots, in teal.
+- 🌱 **Twelve planets** — press `Tab` to change planet: Luna, Mars, Terra, Dune, Canopy,
+  Shoreline, Archipelago, Frost, Aerie, Cinder, Harvest and Blossom.
+- ✨ **The Medieval planet** — a KayKit hex island with a road, a river and a castle. The crew
+  are skeletons whose cloth wears their repo's colour, subagents are Minions, and a
+  long-running thread gets a church, a windmill or a great tower.
 
   ![The Medieval planet](docs/colony-medieval.png)
 
-- **Day and night** — press `L` for the time of day. At night the windows light up in each
+- 🌱 **Day and night** — press `L` for the time of day. At night the windows light up in each
   plot's colour.
-- **Hide a repo** — keep a repo off the map without touching its threads. Show it again from
+- 🌱 **Hide a repo** — keep a repo off the map without touching its threads. Show it again from
   the list.
 
-### Chat and control
+### Chat and control ✨
 
 - **Chat with any Claude Code thread** — select a bot and press `Enter`. The popup shows the
   last turns, streams the reply as markdown, and shows each tool call on one line.
@@ -89,11 +95,15 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
   thread or reloading the page does not stop it. Messages sent mid-reply wait in a queue and go
   as one turn.
 - **Slash commands** — type `/` in the popup for the commands and skills of that thread.
-- **Search and files** — `/` on the map searches every thread, archived ones too. `⌘P` finds a
+- **Search and files** — `/` on the map searches every thread, archived ones too, and revives
+  an archived one. `⌘P` finds a
   file in any repo and opens it beside the chat.
-- **Rename, archive, revive** — renaming a thread renames it in Claude Code too.
+- **Hover cards** — hover an idle bot to read its last message. A thread's card shows its
+  branch and pull requests.
+- **Rename** — renaming a thread renames it in Claude Code too.
+- 🌱 **Archive** (`A`) and **mark viewed** (`V`) come from Bot Crossing.
 
-### Orchestration: one plan, many repos
+### Orchestration: one plan, many repos ✨
 
 Turn a ticket's plan into Claude Code sessions, one per repo, that work in parallel while an
 orchestrator chat reports back.
@@ -137,7 +147,7 @@ npm run share -- close <session> "reason"
 session. The skill's state, drafts and notes carry over. A button shows only when that skill is
 installed in `~/.claude/skills/`; with neither installed, the row is hidden.
 
-### Desktop app
+### Desktop app ✨
 
 - `npm run app` opens the colony in its own window (Electron).
 - Closing the window hides it; the colony keeps running. `⌘Q` quits.
@@ -149,19 +159,20 @@ installed in `~/.claude/skills/`; with neither installed, the row is hidden.
 
 ### Keyboard
 
-Press `?` in the app for the full sheet.
+Press `?` in the app for the full sheet. Keys marked ✨ are new in Agents of Empire; the rest
+come from Bot Crossing.
 
 ![The help sheet: shortcuts, orchestration, and what the badges mean](docs/help-sheet.png)
 
 | Key | Action |
 |-----|--------|
-| `C` | New chat |
-| `/` | Search every thread |
-| `⌘P` / `Ctrl+P` | Find a file in any repo |
+| `C` | New chat ✨ |
+| `/` | Search every thread ✨ |
+| `⌘P` / `Ctrl+P` | Find a file in any repo ✨ |
 | `N` | Fly to the next thread that needs you |
 | `Enter` | Open the selected thread |
 | `V` / `A` | Mark viewed / archive |
-| `⌥N` / `Alt+N` | Next thread that needs you, from inside the chat |
+| `⌥N` / `Alt+N` | Next thread that needs you, from inside the chat ✨ |
 | `Esc` | Close the popup, or deselect |
 | `P` | Screenshot |
 | `H` / `⌘\` | Hide all UI |
