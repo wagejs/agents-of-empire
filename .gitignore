@@ -35,3 +35,6 @@ design/character
 
 # The shared knowledge store, when AGENTS_OF_EMPIRE_STORE points it inside the app.
 .store/
+
+# graphify knowledge graph, rebuilt locally
+graphify-out/
