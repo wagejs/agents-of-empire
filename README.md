@@ -16,6 +16,32 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 
 ---
 
+## Contents
+
+- [What you get](#what-you-get)
+  - [The colony](#the-colony)
+  - [Chat and control](#chat-and-control)
+  - [Orchestration: one plan, many repos](#orchestration-one-plan-many-repos)
+  - [Desktop app](#desktop-app)
+  - [Keyboard](#keyboard)
+- [Quick start](#quick-start)
+  - [What it reads](#what-it-reads)
+  - [Paint the Medieval map](#paint-the-medieval-map)
+- [Make your own planet](#make-your-own-planet)
+  - [Level 1: a new look (data only)](#level-1-a-new-look-data-only)
+  - [Level 2: your own buildings and crew](#level-2-your-own-buildings-and-crew)
+- [Configuration](#configuration)
+  - [Environment variables](#environment-variables)
+- [Routes](#routes)
+- [Project structure](#project-structure)
+- [Tests](#tests)
+- [Credits](#credits)
+  - [Bot Crossing](#bot-crossing)
+  - [Assets](#assets)
+- [License](#license)
+
+---
+
 ## What you get
 
 ### The colony
