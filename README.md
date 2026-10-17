@@ -5,7 +5,7 @@ out of the ship, claims a plot for its repo and builds while it works. Chat with
 thread from the map, approve its tool calls, and run one plan across many repos at once while
 an orchestrator keeps you posted.
 
-![The help sheet: shortcuts, orchestration, and what the badges mean](docs/help-sheet.png)
+![A colony on Terra: three repos, each in its own colour, with their bots and buildings](docs/colony-terra.png)
 
 A fork of [**Bot Crossing**](https://github.com/jarrenrocks/bot-crossing) by Jarren Rocks
 ([@jarrenrocks](https://github.com/jarrenrocks)), which draws the colony, the bots and the
@@ -39,6 +39,8 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 - **Subagents** are smaller bots, teal on the space planets and Minions on Medieval.
 - **Planets** — press `Tab` to change planet. **Medieval** is a KayKit hex island with a road,
   a river and a castle, and its crew are skeletons whose cloth wears the repo's colour.
+  ![The Medieval planet](docs/colony-medieval.png)
+
 - **Day and night** — press `L` for the time of day. At night the windows light up in each
   plot's colour.
 - **Hide a repo** — keep a repo off the map without touching its threads. Show it again from
@@ -119,6 +121,8 @@ session. The skill's state, drafts and notes carry over.
 ### Keyboard
 
 Press `?` in the app for the full sheet.
+
+![The help sheet: shortcuts, orchestration, and what the badges mean](docs/help-sheet.png)
 
 | Key | Action |
 |-----|--------|
