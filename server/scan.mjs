@@ -139,3 +139,9 @@ const chatOf = (harnessId) => {
 export const readMessages = async (harnessId, ref, opts) => chatOf(harnessId).readMessages(ref, opts)
 
 export const chatTarget = async (harnessId, ref) => chatOf(harnessId).chatTarget(ref)
+
+/** A thread's PRs, for harnesses that record them; none for the rest. */
+export const readPrs = async (harnessId, ref) => {
+  const h = chatOf(harnessId)
+  return h.readPrs ? h.readPrs(ref) : { ok: true, prs: [] }
+}

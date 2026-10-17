@@ -15,7 +15,7 @@ import opencode from '../server/harnesses/opencode.mjs'
 
 import { HARNESSES } from '../server/harnesses/index.mjs'
 import codex from '../server/harnesses/codex.mjs'
-import claudeCode from '../server/harnesses/claude-code.mjs'
+import claudeCode, { scanPrs } from '../server/harnesses/claude-code.mjs'
 import { readTail, findExecutable } from '../server/lib/fsutil.mjs'
 import { schemeOf } from '../server/lib/xdg.mjs'
 import { withEnv, withPlatform, fakeExecutable } from './support/env.mjs'
@@ -905,4 +905,31 @@ test('a long thread pages back ten turns at a time, from the oldest message show
   assert.equal(third.more, false, 'nothing before the first message')
   assert.deepEqual((await h.readMessages(ref, { before: 'gone' })).messages, [], 'an anchor not in the thread finds nothing')
   await fsp.rm(fx.root, { recursive: true, force: true })
+})
+
+test('claude-code: scanPrs reads pr-link lines incrementally and dedupes by URL', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bc-prs-'))
+  const file = path.join(dir, 's.jsonl')
+  const pr = (n, at) =>
+    JSON.stringify({ type: 'pr-link', prNumber: n, prUrl: `https://github.com/o/r/pull/${n}`, prRepository: 'o/r', timestamp: at })
+  await fsp.writeFile(file, [pr(1, '2026-01-01T00:00:00Z'), '{"type":"user","message":"héllo pr-link"}', pr(1, '2026-01-01T00:00:00Z'), ''].join('\n'))
+  assert.deepEqual((await scanPrs(file)).map((p) => p.number), [1])
+  // A line written in two goes: half now, half on the next scan.
+  const line = pr(2, '2026-01-02T00:00:00Z')
+  await fsp.appendFile(file, line.slice(0, 20))
+  assert.deepEqual((await scanPrs(file)).map((p) => p.number), [1])
+  await fsp.appendFile(file, `${line.slice(20)}\n{"type":"pr-link","prUrl":"javascript:x"}\n`)
+  const prs = await scanPrs(file)
+  assert.deepEqual(prs.map((p) => [p.number, p.repo]), [[1, 'o/r'], [2, 'o/r']])
+  await fsp.rm(dir, { recursive: true })
+})
+
+test('link: prStatus names where a PR stands', async () => {
+  const { prStatus } = await import('../server/link.mjs')
+  assert.equal(prStatus({ state: 'MERGED', isDraft: true }), 'merged')
+  assert.equal(prStatus({ state: 'CLOSED' }), 'closed')
+  assert.equal(prStatus({ state: 'OPEN', isDraft: true, reviewDecision: 'APPROVED' }), 'draft')
+  assert.equal(prStatus({ state: 'OPEN', reviewDecision: 'APPROVED' }), 'approved')
+  assert.equal(prStatus({ state: 'OPEN', reviewDecision: 'CHANGES_REQUESTED' }), 'changes')
+  assert.equal(prStatus({ state: 'OPEN', reviewDecision: '' }), 'open')
 })

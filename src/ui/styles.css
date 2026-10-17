@@ -2786,3 +2786,115 @@ kbd {
   opacity: 1;
   color: #4ade80;
 }
+
+/* The peek at a quiet bot's last message, beside the cursor. */
+.hover-card {
+  position: fixed;
+  z-index: 7;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px 12px;
+  pointer-events: none;
+  font-size: 12.5px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.hover-card[hidden] {
+  display: none;
+}
+
+.hover-card .hc-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-card .hc-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.hover-card .hc-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Where a thread's work went: its branch and the PRs it opened. */
+.hover-card .hc-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.hover-card .hc-where > span {
+  margin-right: 4px;
+}
+
+.thread-pop .prs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.thread-pop .prs[hidden] {
+  display: none;
+}
+
+.chat .head-prs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+}
+
+.chat .head-prs[hidden] {
+  display: none;
+}
+
+/* A PR, coloured as GitHub colours it; a PR whose status is unknown stays neutral. */
+.pr-pill {
+  --pr: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--pr) 45%, transparent);
+  background: color-mix(in srgb, var(--pr) 16%, transparent);
+  color: color-mix(in srgb, var(--pr) 70%, white);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pr-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pr);
+}
+
+.pr-pill:hover {
+  background: color-mix(in srgb, var(--pr) 28%, transparent);
+}
+
+.pr-pill.is-open { --pr: var(--green); }
+.pr-pill.is-approved { --pr: var(--teal); }
+.pr-pill.is-changes { --pr: var(--amber); }
+.pr-pill.is-draft { --pr: var(--dim); }
+.pr-pill.is-merged { --pr: #8957e5; }
+.pr-pill.is-closed { --pr: var(--red); }

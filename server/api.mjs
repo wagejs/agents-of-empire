@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
-import { previewLink } from './link.mjs'
+import { previewLink, withPrStatus } from './link.mjs'
 import { freshLoop, LOOP_SKILLS } from './loops.mjs'
 import { readMarkdown } from './mdfile.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
@@ -18,6 +18,7 @@ import {
   newSession as harnessNewSession,
   openThread as harnessOpenThread,
   readMessages,
+  readPrs,
   scanThreads,
 } from './scan.mjs'
 
@@ -491,6 +492,13 @@ async function chat(pathname, req, res) {
   /** What the chat's link panel should show for a link a reply gave: a PR, an issue, or a page. */
   if (pathname === '/api/chat/link') {
     return send(res, 200, await previewLink(String(body.url || '')))
+  }
+
+  /** The PRs a thread opened, as its transcript records them. */
+  if (pathname === '/api/chat/prs') {
+    const prs = await readPrs(body.harness, body.ref)
+    if (prs.ok) prs.prs = await withPrStatus(prs.prs)
+    return send(res, prs.ok ? 200 : 404, prs)
   }
 
   /** A markdown file a chat names, read to show beside the chat. */

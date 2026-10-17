@@ -143,6 +143,9 @@ export const chatStart = (folder, text, mode, model) => post('/api/chat/new', { 
 export const chatCommands = ({ thread, folder }) =>
   post('/api/chat/commands', thread ? { harness: thread.harness, ref: thread.ref } : { folder })
 
+/** The PRs a thread opened: `{ prs: [{ number, url, repo }] }`. */
+export const threadPrs = (thread) => post('/api/chat/prs', { harness: thread.harness, ref: thread.ref })
+
 /** A markdown file a chat named, to show beside the chat: `{ path, text }`. */
 export const chatFile = (path, cwd) => post('/api/chat/file', { path, cwd })
 

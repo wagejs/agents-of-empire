@@ -18,6 +18,7 @@
 import fsp from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import os from 'node:os'
 import { exists, findExecutable, jsonLines, listDirs, listFiles, num, readHead, readTail } from '../lib/fsutil.mjs'
 
@@ -293,6 +294,8 @@ async function transcriptMeta(entry) {
       for (const r of jsonLines(await readTail(entry.file, TAIL_BYTES))) {
         if (r.customTitle) meta.customTitle = r.customTitle
         if (r.aiTitle) meta.aiTitle = r.aiTitle
+        // The branch the session is on now, not the one it started on.
+        if (r.gitBranch && r.gitBranch !== 'HEAD') meta.gitBranch = r.gitBranch
         if (r.type === 'assistant' && r.message?.model && r.message.model !== '<synthetic>') meta.model = r.message.model
       }
     }
@@ -755,6 +758,54 @@ const CHAT_TURNS = 10
 const CHAT_LIMIT = 400
 
 /**
+ * The PRs a session opened or was linked to, as Claude Code records them: a `pr-link` line in
+ * the transcript, with the number, URL and repo. Read in growing slices: a transcript only ever
+ * grows, so each call reads what was added since the last one, and a 200 MB thread costs its
+ * full read once. A file that shrank was rewritten, and is read again from the start.
+ */
+const prCache = new Map()
+const PR_SLICE = 4 * 1024 * 1024
+
+export async function scanPrs(file) {
+  const { size } = await fsp.stat(file)
+  let seen = prCache.get(file)
+  if (!seen || size < seen.size) seen = { size: 0, prs: new Map(), tail: '', utf8: new StringDecoder('utf8') }
+  const fh = await fsp.open(file, 'r')
+  try {
+    for (let at = seen.size; at < size; at += PR_SLICE) {
+      const buf = Buffer.allocUnsafe(Math.min(PR_SLICE, size - at))
+      const { bytesRead } = await fh.read(buf, 0, buf.length, at)
+      // A line can straddle two slices; the unfinished end waits for the next one.
+      const lines = (seen.tail + seen.utf8.write(buf.subarray(0, bytesRead))).split('\n')
+      seen.tail = lines.pop()
+      for (const line of lines) {
+        if (!line.includes('"pr-link"')) continue
+        try {
+          const r = JSON.parse(line)
+          if (r.type === 'pr-link' && /^https:\/\/github\.com\//.test(r.prUrl || '')) {
+            seen.prs.set(r.prUrl, { number: r.prNumber, url: r.prUrl, repo: r.prRepository || '', at: Date.parse(r.timestamp) || 0 })
+          }
+        } catch {
+          /* a damaged line is skipped */
+        }
+      }
+    }
+  } finally {
+    await fh.close()
+  }
+  seen.size = size
+  prCache.set(file, seen)
+  return [...seen.prs.values()].sort((a, b) => a.at - b.at)
+}
+
+/** A thread's PRs, and the branch it is on, for the cards. */
+async function readPrs(ref) {
+  const file = await transcriptOf(ref?.cliSessionId)
+  if (!file) return { ok: false, error: 'That thread has no transcript on this machine' }
+  return { ok: true, prs: await scanPrs(file) }
+}
+
+/**
  * The last few turns of a thread, as the chat popup shows them: what you typed, and what Claude
  * said and ran. Tool results, injected context and subagent traffic are left out.
  *
@@ -899,6 +950,7 @@ export default {
   openThread,
   newSession,
   readMessages,
+  readPrs,
   chatTarget,
   paths: { DESKTOP_SESSIONS, CLI_PROJECTS, CLI_LIVE },
 }

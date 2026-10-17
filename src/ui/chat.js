@@ -13,11 +13,12 @@ import { chatAttach, chatCommands, chatFile, chatMessages, chatMode, chatModel, 
 import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { LinkPanel } from './link-panel.js'
+import { prPill, prsFor } from './hover-card.js'
 
 const TEMPLATE = `
 <div class="sheet panel">
   <div class="chat-head">
-    <div class="info"><div class="repo-tag" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
+    <div class="info"><div class="repo-tag" hidden></div><div class="head-prs" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
     <button class="btn ghost" data-report title="You talked to this repo session yourself: pass that conversation on to its orchestrator" hidden>Report to orchestrator</button>
     <button class="btn ghost" data-next title="Next thread that needs you (⌥N)" hidden></button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
@@ -252,8 +253,8 @@ export class Chat {
       )
     })
     // A link Claude gives, a PR say, opens in a panel beside the chat rather than a tab.
-    this.log.addEventListener('click', (e) => {
-      const link = e.target.closest?.('a[href^="http"]')
+    this.el.addEventListener('click', (e) => {
+      const link = e.target.closest?.('.chat-log a[href^="http"], .head-prs a')
       if (!link || e.metaKey || e.ctrlKey || e.shiftKey) return
       e.preventDefault()
       this.linkPanel.open(link.href)
@@ -498,6 +499,25 @@ export class Chat {
     tag.style.setProperty('--repo', repo.color)
   }
 
+  /** The PRs this session opened, beside the repo; each opens in the link panel. */
+  async showPrs(thread) {
+    const box = this.$('.head-prs')
+    box.hidden = true
+    if (!thread?.canChat || !thread.ref) return
+    const prs = await prsFor(thread)
+    if (this.thread?.id !== thread.id) return
+    // The repo tag above already names this repo; only a PR elsewhere says where.
+    const here = this.repoOf(thread)?.name
+    box.replaceChildren(
+      ...prs.map((p) => {
+        const repo = p.repo.split('/').pop()
+        const text = repo && repo !== here ? `#${p.number} ${repo}` : `#${p.number}`
+        return prPill(p, text)
+      })
+    )
+    box.hidden = !prs.length
+  }
+
   /** The header's second line: the harness, and the model replying, as far as it is known. */
   showModel(model) {
     this.$('.sub').textContent = [this.harness, model && shortModel(model)].filter(Boolean).join(' · ')
@@ -619,6 +639,7 @@ export class Chat {
     this.blocked = false
     this.$('.title').textContent = title
     this.showRepo(thread)
+    this.showPrs(thread)
     this.harness = sub
     this.showModel(thread?.model)
     this.$('.sub').hidden = false
@@ -900,7 +921,10 @@ export class Chat {
     let next = null
     const onEvent = (event) => {
       seen++
-      if (event.type === 'done') finished = true
+      if (event.type === 'done') {
+        finished = true
+        if (this.thread?.id === current?.id) this.showPrs({ ...current, lastActivityAt: Date.now() })
+      }
       if (event.type === 'next') next = event.runId
       if (event.type === 'queued') {
         // What you typed goes under everything so far, and what Claude does next goes under
@@ -921,6 +945,7 @@ export class Chat {
       this.$('.sub').hidden = false
       this.$('.title').textContent = current.title
       this.showRepo(current)
+      this.showPrs(current)
       this.input.placeholder = MESSAGE_PLACEHOLDER
       remember(current.id)
       // The new thread keeps the size its empty popup had.

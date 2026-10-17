@@ -7,6 +7,7 @@ import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } fro
 import { Hud } from './ui/hud.js'
 import { PLOT_PALETTE, hashString } from './world/plots.js'
 import { Chat, lastChat } from './ui/chat.js'
+import { HoverCard } from './ui/hover-card.js'
 import { Search } from './ui/search.js'
 import { PlanPanel } from './ui/plan-panel.js'
 import { PLANETS } from './world/planet.js'
@@ -405,6 +406,9 @@ const hud = new Hud(app, settings, actions)
  * watched arrive is not asking for you, so the thread is marked seen again, after the refresh,
  * because it is the refresh that learns how far the thread moved.
  */
+/** The peek at what a quiet bot's thread said last, beside the cursor. */
+const hoverCard = new HoverCard(hud.el)
+
 const chat = new Chat(hud.el, {
   // A new thread that never got as far as starting comes back as null: refresh, nothing to mark.
   onDone: async (thread) => {
@@ -719,12 +723,16 @@ engine.canvas.addEventListener('pointermove', (e) => {
   // while the world is being dragged would flicker the hover ring across the whole colony.
   if (rig.interacting) {
     engine.canvas.style.cursor = rig._mode === 'orbit' ? 'move' : 'grabbing'
+    hoverCard.hide()
     return
   }
   const p = ndc(e)
   const agent = colony.pick(p.x, p.y, p.aspect)
   hoverId = agent?.id ?? null
   colony.astronauts.setHover(agent)
+  // A quiet bot shows what its thread said last; a working one is about to say something new.
+  const quiet = agent && agent.status !== 'working' ? threads.find((t) => t.id === agent.id) : null
+  hoverCard.show(quiet, e.clientX, e.clientY, quiet && (STATUS_LABEL[agent.status] || agent.status))
   // Pointing at a quiet plot is what makes its name appear.
   const plot = plotUnder(e, p)
   colony.setHoveredPlot(plot)
@@ -1024,6 +1032,7 @@ engine.canvas.addEventListener('pointerleave', () => {
   hoverId = null
   colony.astronauts.setHover(null)
   colony.setHoveredPlot(null)
+  hoverCard.hide()
 })
 
 // ── keyboard ──────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { TIMES, systemTimeOfDay } from '../world/sky.js'
 import { STATUS_LABEL } from '../game/colony.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
+import { prPill, prsFor } from './hover-card.js'
 
 /**
  * The whole HUD, in plain DOM.
@@ -855,7 +856,7 @@ export class Hud {
     // starting with whose it is, since that decides what Open can do.
     if (thread.harnessName) bits.push(`<span class="tag">${escapeHtml(thread.harnessName)}</span>`)
     if (thread.worktree) bits.push(`<span class="tag">⑂ ${escapeHtml(thread.worktree)}</span>`)
-    if (thread.gitBranch) bits.push(`<span class="tag">${escapeHtml(thread.gitBranch)}</span>`)
+    if (thread.gitBranch) bits.push(`<span class="tag" title="Branch">⎇ ${escapeHtml(thread.gitBranch)}</span>`)
     if (thread.model) bits.push(`<span class="tag">${escapeHtml(shortModel(thread.model))}</span>`)
     bits.push(`<span>${ago(thread.lastActivityAt)}</span>`)
     // A subagent says so, and whose it is. It has no session of its own, so none of the thread
@@ -866,6 +867,7 @@ export class Hud {
     }
     meta.innerHTML = bits.join('')
     this.$('.thread-pop .pair').hidden = Boolean(thread.parentId)
+    this.showPrs(thread)
 
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
     this.$('.thread-pop .progress > i').style.width = `${pct}%`
@@ -973,6 +975,23 @@ export class Hud {
     this._sideWidth = right
     this.el.style.setProperty('--side', `${right}px`)
     this.actions.viewportChanged?.({ width, height, right, bottom })
+  }
+
+  /**
+   * The PRs this thread opened, as links on the card. Asked for once per thread and change,
+   * not on every poll that redraws the card.
+   */
+  async showPrs(thread) {
+    const row = this.$('.thread-pop .prs')
+    const key = `${thread.id}@${thread.lastActivityAt}`
+    if (this._prsKey === key) return
+    this._prsKey = key
+    if (this._prsFor !== thread.id) row.hidden = true
+    this._prsFor = thread.id
+    const prs = thread.canChat && !thread.parentId ? await prsFor(thread) : []
+    if (this._prsKey !== key) return
+    row.replaceChildren(...prs.map((p) => prPill(p)))
+    row.hidden = !prs.length
   }
 
   /** Redraw the card's face so it blinks in step with the astronaut it belongs to. */
@@ -1336,6 +1355,7 @@ const TEMPLATE = `
     <div class="info">
       <div class="title" title="Click to rename"></div>
       <div class="meta"></div>
+      <div class="prs" hidden></div>
     </div>
     <button class="btn icon ghost" id="btn-follow" title="Follow selected bot" aria-label="Follow selected bot" aria-pressed="false">${ICON.locate}</button>
     <button class="btn icon ghost" id="btn-deselect" title="Deselect (Esc)">${ICON.close}</button>

@@ -72,3 +72,40 @@ export async function previewLink(url, { gh = findExecutable('gh', ['/opt/homebr
     return { ok: true, kind: 'frame' }
   }
 }
+
+/**
+ * Where each PR stands, for the pills: draft, open, approved, changes, merged or closed. One `gh`
+ * call a PR, all at once, each kept for a couple of minutes; a PR `gh` cannot read keeps no status.
+ * ponytail: one call per PR; a GraphQL batch per repo if sessions ever carry dozens.
+ */
+const STATE_TTL_MS = 120_000
+const stateCache = new Map()
+
+export function prStatus({ state, isDraft, reviewDecision } = {}) {
+  if (state === 'MERGED') return 'merged'
+  if (state === 'CLOSED') return 'closed'
+  if (isDraft) return 'draft'
+  if (reviewDecision === 'APPROVED') return 'approved'
+  if (reviewDecision === 'CHANGES_REQUESTED') return 'changes'
+  return 'open'
+}
+
+export async function withPrStatus(prs, { gh = findExecutable('gh', ['/opt/homebrew/bin', '/usr/local/bin']), now = Date.now() } = {}) {
+  const bin = await gh
+  if (!bin) return prs
+  return Promise.all(
+    prs.map(async (pr) => {
+      const ref = githubRef(pr.url)
+      if (!ref || ref.kind !== 'pull') return pr
+      let hit = stateCache.get(pr.url)
+      if (!hit || now - hit.at > STATE_TTL_MS) {
+        const ask = run(bin, ['pr', 'view', ref.number, '-R', `${ref.owner}/${ref.repo}`, '--json', 'state,isDraft,reviewDecision'])
+          .then((out) => prStatus(JSON.parse(out)), () => '')
+        hit = { at: now, status: ask }
+        stateCache.set(pr.url, hit)
+      }
+      const status = await hit.status
+      return status ? { ...pr, status } : pr
+    })
+  )
+}
