@@ -2730,6 +2730,11 @@ kbd {
 }
 
 /* Fresh loop: one button per all-day skill, under the stats. */
+.side .loops[hidden],
+.side .loops [hidden] {
+  display: none;
+}
+
 .side .loops {
   display: flex;
   flex-wrap: wrap;

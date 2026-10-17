@@ -635,6 +635,13 @@ export class Hud {
    * Which the sidebar shows: the repos (the list, or one repo drilled into), or the shared
    * runs and their sessions. The tabs sit above both, so they are there wherever you are.
    */
+  /** Fresh loop buttons only for the loop skills installed here; no row at all without one. */
+  showLoops(skills) {
+    const row = this.$('.loops')
+    for (const b of row.querySelectorAll('[data-loop]')) b.hidden = !skills.includes(b.dataset.loop)
+    row.hidden = !skills.length
+  }
+
   showTab(name) {
     for (const t of this.el.querySelectorAll('.side-tabs [data-tab]')) t.setAttribute('aria-selected', String(t.dataset.tab === name))
     this.$('.side').classList.toggle('tab-runs', name === 'runs')
@@ -1305,7 +1312,7 @@ const TEMPLATE = `
 
   <div class="stats"></div>
 
-  <div class="loops" title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
+  <div class="loops" hidden title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
     <span class="loops-label">Fresh loop</span>
     <button type="button" class="btn" data-loop="pr-watch">↻ pr-watch</button>
     <button type="button" class="btn" data-loop="review-queue">↻ review-queue</button>

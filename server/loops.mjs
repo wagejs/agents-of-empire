@@ -10,6 +10,7 @@
  * subagent it was holding, so the handoff points the new session at the old transcript in case
  * a round was cut off half way.
  */
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,6 +23,10 @@ const HOME = os.homedir()
 /** Where both skills have always run: Claude Code's own folder. */
 const LOOP_CWD = path.join(HOME, '.claude')
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'projects')
+
+/** The loop skills installed as personal skills here. Only those get a Fresh loop button. */
+export const installedLoops = (dir = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'skills')) =>
+  LOOP_SKILLS.filter((skill) => fs.existsSync(path.join(dir, skill, 'SKILL.md')))
 
 const until = async (test, ms, step = 250) => {
   for (const end = Date.now() + ms; Date.now() < end; ) {

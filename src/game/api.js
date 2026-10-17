@@ -15,6 +15,7 @@ const post = (url, payload) =>
   })
 
 export const fetchThreads = () => req('/api/threads')
+export const fetchLoops = () => req('/api/loops').then((r) => r.skills || [], () => [])
 
 /**
  * The colony file, and the base every later save is measured against.

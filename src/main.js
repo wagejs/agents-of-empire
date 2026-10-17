@@ -36,6 +36,7 @@ import {
   revealFolder,
   chatFreshLoop,
   shareAnswer,
+  fetchLoops,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
@@ -405,6 +406,7 @@ ambience.setPlanet(colony.planet)
 colony.onSound = (name, x, y, z) => ambience.play(name, { x, y, z, kind: colony.fauna.flock?.kind })
 
 const hud = new Hud(app, settings, actions)
+fetchLoops().then((skills) => hud.showLoops(skills))
 
 /**
  * A reply moves its thread on, so the colony is refreshed once each one ends. A reply you just

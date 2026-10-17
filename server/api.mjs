@@ -7,7 +7,7 @@ import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { previewLink, withPrStatus } from './link.mjs'
 import { grepFiles, listFiles, openInEditor, readFile, readImage } from './files.mjs'
-import { freshLoop, LOOP_SKILLS } from './loops.mjs'
+import { freshLoop, installedLoops, LOOP_SKILLS } from './loops.mjs'
 import { readMarkdown } from './mdfile.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { shareRoles, shareRoute } from './conductor.mjs'
@@ -628,6 +628,10 @@ export async function apiMiddleware(req, res, next) {
       // appearing healthy in the list while quietly contributing nothing.
       const warnings = (await harnessStatus()).filter((h) => h.detected && h.error).map((h) => h.error)
       return send(res, 200, { threads, scannedAt: Date.now(), warnings })
+    }
+
+    if (url.pathname === '/api/loops' && req.method === 'GET') {
+      return send(res, 200, { skills: installedLoops() })
     }
 
     if (url.pathname === '/api/harnesses' && req.method === 'GET') {

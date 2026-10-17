@@ -530,3 +530,16 @@ test('a fresh loop is named once its transcript exists, and says so when it neve
   assert.equal(await nameSession('99999999-9999-4999-8999-999999999999', 'pr-watch', { rename, wait: 600 }), false)
   assert.equal(renamed.length, 1, 'nothing renamed that is not there')
 })
+
+test('installedLoops lists only the loop skills installed as personal skills', async () => {
+  const { installedLoops } = await import('../server/loops.mjs')
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-skills-'))
+  try {
+    assert.deepEqual(installedLoops(dir), [])
+    await fsp.mkdir(path.join(dir, 'review-queue'), { recursive: true })
+    await fsp.writeFile(path.join(dir, 'review-queue', 'SKILL.md'), '# x')
+    assert.deepEqual(installedLoops(dir), ['review-queue'])
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})

@@ -133,7 +133,8 @@ npm run share -- close <session> "reason"
 ```
 
 **Fresh loop** (`↻ pr-watch`, `↻ review-queue`) restarts a long-running skill in a new
-session. The skill's state, drafts and notes carry over.
+session. The skill's state, drafts and notes carry over. A button shows only when that skill is
+installed in `~/.claude/skills/`; with neither installed, the row is hidden.
 
 ### Desktop app
 
@@ -323,8 +324,8 @@ This is how Medieval was made; its commit, `ba30463`, is the worked example to f
 | `AGENTS_OF_EMPIRE_ANTIGRAVITY_HOME` | Antigravity's data folder | Override for that folder |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code's config folder, as Claude Code reads it |
 
-`AGENTS_OF_EMPIRE_REPOS` and `AGENTS_OF_EMPIRE_FILES_ROOT` default to the author's workspace;
-point them at your own.
+Point `AGENTS_OF_EMPIRE_REPOS` and `AGENTS_OF_EMPIRE_FILES_ROOT` at the folder that holds your
+git checkouts.
 
 ---
 
@@ -336,6 +337,7 @@ All under `/api`, served by [`server/api.mjs`](server/api.mjs).
 |---------------|---------|
 | `GET /api/threads` | Every thread from every harness |
 | `GET /api/harnesses` | Harnesses found on this machine |
+| `GET /api/loops` | Loop skills installed, for the Fresh loop buttons |
 | `GET` · `PUT /api/state` | The colony's saved state |
 | `GET` · `POST /api/storage` | The page's own storage, mirrored for the desktop app |
 | `POST /api/open` · `/api/new-session` · `/api/reveal` | Open a thread, start one in a harness, show a folder |
