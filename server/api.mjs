@@ -198,8 +198,10 @@ function launch(target) {
  * arrive from the page, which got them from a scan that may be minutes old — a repo that
  * has since been moved or deleted must fail here rather than hand the opener a dead path.
  * Absolute is judged by `path.isAbsolute` rather than a leading `/`, which no Windows path has.
+ * `~` is the home folder: a chat started with no repo picked starts there.
  */
 async function resolveFolder(folder) {
+  if (folder === '~' || folder?.startsWith?.('~/')) folder = path.join(os.homedir(), folder.slice(1))
   if (typeof folder !== 'string' || !path.isAbsolute(folder)) return null
   const dir = path.resolve(folder)
   const stat = await fsp.stat(dir).catch(() => null)

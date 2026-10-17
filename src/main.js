@@ -199,6 +199,8 @@ const actions = {
    * its workspace — nothing here is resumed, and nothing is written to disk.
    */
   newConversation: async () => {
+    // No repo picked: a chat in the home folder, which can still be moved to any repo first.
+    if (!selectedProject) return chat.openNew({ folder: '~', name: 'Home', repos: knownRepos() })
     const name = selectedProject
     const folder = name && pathForProject(name)
     if (!folder) {
@@ -1133,7 +1135,7 @@ window.addEventListener('keydown', (e) => {
       break
     case 'c':
     case 'C':
-      if (selectedProject) actions.newConversation()
+      actions.newConversation()
       break
     case '?':
       hud.toggleHelp()

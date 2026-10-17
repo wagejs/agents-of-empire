@@ -4,6 +4,7 @@ import { TIMES, systemTimeOfDay } from '../world/sky.js'
 import { STATUS_LABEL } from '../game/colony.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
+import { mdiSitemap, mdiSourceBranch } from '@mdi/js'
 import { prPill, prsFor } from './hover-card.js'
 import { rememberSize } from './resizable.js'
 
@@ -482,6 +483,7 @@ export class Hud {
     on('#btn-help', 'click', () => this.toggleHelp())
     on('#btn-plan', 'click', () => this.actions.openPlan?.())
     on('#btn-search', 'click', () => this.actions.openSearch?.())
+    on('#btn-new-chat', 'click', () => this.actions.newConversation?.())
     on('#btn-shot', 'click', () => this.actions.screenshot?.())
     on('#btn-home', 'click', () => this.actions.resetView?.())
     on('#btn-next', 'click', () => this.actions.focusStatus?.('waiting'))
@@ -1284,12 +1286,22 @@ const TEMPLATE = `
   <div class="grab"></div>
   <header class="brandbar">
     <div class="brand"><i class="dot"></i>Agents of Empire</div>
-    <button class="btn icon ghost" id="btn-search" title="Search every thread, archived too (/)">${ICON.search}</button>
-    <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
-    <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
-    <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H)">${ICON.eye}</button>
-    <button class="btn icon ghost" id="btn-settings" title="Settings (S)" aria-pressed="false">${ICON.settings}</button>
   </header>
+
+  <nav class="toolbar">
+    <div class="tool-group" role="group" aria-label="Threads">
+      <span class="tool-label">Threads</span>
+      <button class="btn icon ghost" id="btn-new-chat" title="New chat, in the selected repo or your home folder (C)">${ICON.plus}</button>
+      <button class="btn icon ghost" id="btn-search" title="Search every thread, archived too (/)">${ICON.search}</button>
+    </div>
+    <div class="tool-group" role="group" aria-label="View">
+      <span class="tool-label">View</span>
+      <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
+      <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
+      <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H)">${ICON.eye}</button>
+      <button class="btn icon ghost" id="btn-settings" title="Settings (S)" aria-pressed="false">${ICON.settings}</button>
+    </div>
+  </nav>
 
   <div class="stats"></div>
 
@@ -1391,32 +1403,40 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Agents of Empire</h2>
-    <p class="sub">Every coding-agent thread on this machine is a bot. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Hide a repo from that panel if you would rather not see it — its threads stay in your harness, and you can show it again from the list. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
+    <div class="help-grid">
+      <div class="help-col">
+    <p class="sub">Every coding-agent thread on this machine is a bot. They walk out of the ship, claim a plot for their repo, and build. Click a bot to open its thread; click a zone — its deck or its name — for the repo itself. Hide a repo from that panel if you would rather not see it; its threads stay in your harness, and you can show it again from the list.</p>
+    <p class="sub">The sidebar's top row holds the two button groups below. <b>New chat</b> starts in the selected repo, or in your home folder when none is selected, and either way you can switch it to any repo before the first message. Navigation works like Google Earth: drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
     <div class="cols">
       <div>
+        <h3>Threads</h3>
+        <div class="k"><span>New chat</span><kbd>C</kbd></div>
+        <div class="k"><span>Search every thread</span><kbd>/</kbd></div>
+        <div class="k"><span>Find a file in any repo</span><kbd>${IS_MAC ? '⌘' : 'Ctrl'}P</kbd></div>
+        <div class="k"><span>Next needing you</span><kbd>N</kbd></div>
+        <div class="k"><span>Open selected thread</span><kbd>Enter</kbd></div>
+        <div class="k"><span>Mark viewed</span><kbd>V</kbd></div>
+        <div class="k"><span>Archive</span><kbd>A</kbd></div>
+        <div class="k"><span>Next needing you, in chat</span><kbd>${IS_MAC ? '⌥' : 'Alt'}N</kbd></div>
+        <div class="k"><span>Close popup / deselect</span><kbd>Esc</kbd></div>
+        <h3>View</h3>
+        <div class="k"><span>Screenshot</span><kbd>P</kbd></div>
+        <div class="k"><span>This sheet</span><kbd>?</kbd></div>
+        <div class="k"><span>Hide all UI</span><kbd>H</kbd> <kbd>${IS_MAC ? '⌘' : 'Ctrl'}\\</kbd></div>
+        <div class="k"><span>Settings</span><kbd>S</kbd></div>
+      </div>
+      <div>
+        <h3>Map</h3>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
         <div class="k"><span>Tilt &amp; rotate</span><kbd>right-drag</kbd></div>
         <div class="k"><span>&nbsp;</span><kbd>⌃ or ⇧ + drag</kbd></div>
         <div class="k"><span>Zoom to cursor</span><kbd>scroll</kbd></div>
         <div class="k"><span>Move / zoom</span><kbd>arrows</kbd> <kbd>+ −</kbd></div>
         <div class="k"><span>Reset view</span><kbd>0</kbd></div>
-        <div class="k"><span>Hide all UI</span><kbd>H</kbd> <kbd>${IS_MAC ? '⌘' : 'Ctrl'}\\</kbd></div>
-        <div class="k"><span>Settings</span><kbd>S</kbd></div>
-        <div class="k"><span>Find a file in any repo</span><kbd>${IS_MAC ? '⌘' : 'Ctrl'}P</kbd></div>
-        <div class="k"><span>Screenshot</span><kbd>P</kbd></div>
-      </div>
-      <div>
-        <div class="k"><span>Next needing you</span><kbd>N</kbd></div>
-        <div class="k"><span>Open thread</span><kbd>Enter</kbd></div>
-        <div class="k"><span>Mark viewed</span><kbd>V</kbd></div>
-        <div class="k"><span>Archive</span><kbd>A</kbd></div>
-        <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
         <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>
         <div class="k"><span>Mute</span><kbd>M</kbd></div>
-        <div class="k"><span>Deselect</span><kbd>Esc</kbd></div>
-        <div class="k"><span>This sheet</span><kbd>?</kbd></div>
       </div>
     </div>
     <div style="margin-top:16px">
@@ -1425,6 +1445,27 @@ const TEMPLATE = `
       <div class="legend-row"><i class="badge" style="background:#16301f;color:#7fd39a">⚒</i> running right now, building</div>
       <div class="legend-row"><i class="badge" style="background:#332b12;color:#e6c67f">✓</i> its pull request landed</div>
       <div class="legend-row"><i class="badge" style="background:#1d1f2e;color:#a9a8c0">z</i> nothing for three days</div>
+    </div>
+      </div>
+      <div class="help-col">
+    <div class="orchestration">
+      <h3>Orchestration: one plan, many repos</h3>
+      <p class="sub">Turn a ticket's plan into Claude Code sessions, one per repo, that work in parallel while an orchestrator chat keeps you posted.</p>
+      <ol>
+        <li><b>Run a plan</b> (sidebar) takes a <code>plan.md</code> path. Each <code>###</code> step under <code>## Implementation steps</code> belongs to the repo named in backticks in its heading; "depends on step 1" orders them.</li>
+        <li>The preview shows the repo sessions and their order. Pick a model for each (Opus 5.5 by default), then start.</li>
+        <li>The <b>orchestrator</b> opens as a chat. Talk to it like any thread: it starts the sessions, reads each report back to you, and answers what the plan already answers.</li>
+        <li>Each <b>repo session</b> works in its own git worktree, branched fresh from the remote default branch, and commits on <code>share/&lt;session&gt;</code>. It walks onto the map in its repo's zone. A session waits until the steps it depends on have reported, and starts with their summaries.</li>
+        <li>The <b>Orchestrations</b> tab lists every run. Fly to a session, or <b>Allow / Deny</b> a command it is holding: pushes, PRs, deploys, databases. After 5 approved pushes for a repo, its sessions push without asking.</li>
+        <li>Nothing is approved or closed without you. Approved reports become shared notes in <code>~/.claude/.store</code> that later sessions read.</li>
+      </ol>
+      <h3>Labels over their heads</h3>
+      <div class="legend-row"><i class="badge pin" style="background:#3a2412;color:#f0a35a"><svg viewBox="0 0 24 24"><path fill="currentColor" d="${mdiSitemap}"/></svg></i> <span><b>Orchestrator</b>, the main session of a run. One per plan; it lives in <code>~/.claude</code>, so it stands in that zone.</span></div>
+      <div class="legend-row"><i class="badge pin" style="background:#211d3d;color:#a79cf0"><svg viewBox="0 0 24 24"><path fill="currentColor" d="${mdiSourceBranch}"/></svg></i> <span><b>Repo session</b>, a child of the orchestrator. One per repo in the plan, standing in that repo's zone.</span></div>
+      <p class="sub">The small pin sits on top of the status badge, so a child that is waiting on you shows both: the branch over the <b>?</b>.</p>
+      <p class="sub"><b>Fresh loop</b> (↻ pr-watch, ↻ review-queue) restarts that skill in a new session. Its state, drafts and notes carry over.</p>
+    </div>
+      </div>
     </div>
     <div style="margin-top:18px;display:flex;justify-content:flex-end">
       <button class="btn primary" id="btn-help-close">Got it</button>
