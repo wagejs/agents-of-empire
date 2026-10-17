@@ -207,6 +207,17 @@ come from Bot Crossing.
 You need **Node.js 22.13 or later**. Chat and orchestration also need the
 [Claude Code](https://claude.com/claude-code) CLI with a login.
 
+Orchestration also needs:
+
+- **Git checkouts with a remote.** Each repo in a plan is a folder under
+  `AGENTS_OF_EMPIRE_REPOS` (`~/projects` by default) whose remote has a default branch;
+  repo sessions branch from it in their own worktree.
+- **Access to the models it uses.** The orchestrator runs on Opus 5.5 by default and repo
+  sessions on Sonnet; you can pick per session in the plan preview.
+- **Optional: [graphify](https://github.com/Graphify-Labs/graphify)** for code graphs. A repo with
+  `graphify-out/graph.json` lets its session query the graph; without one, sessions read the code
+  directly.
+
 ```bash
 git clone https://github.com/wagejs/agents-of-empire.git
 cd agents-of-empire

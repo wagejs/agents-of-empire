@@ -1,5 +1,9 @@
 # Trademarks and character rights
 
+> This is [Bot Crossing](https://github.com/jarrenrocks/bot-crossing)'s trademark and character
+> statement by Jarren Rocks, kept here unchanged as it asks. It covers the Bot Crossing name and
+> crew character, not Agents of Empire. This fork follows it by using a different name.
+
 The Bot Crossing source code is licensed under the [MIT Licence](LICENSE). This document covers
 the two things that licence does not: the project name, and the crew character design.
 

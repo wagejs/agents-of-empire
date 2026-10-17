@@ -1,6 +1,6 @@
 {
   "name": "agents-of-empire",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "A 3D colony for every coding-agent thread on your computer: chat with Claude Code threads, approve their tool calls, and run one plan across many repos.",
