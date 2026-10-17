@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A 3D colony sim where every coding-agent thread on your machine is a little astronaut building something.",
+  "description": "A 3D colony for every coding-agent thread on your computer: chat with Claude Code threads, approve their tool calls, and run one plan across many repos.",
   "license": "MIT",
   "author": "Muhammad Wage Juli Saputra",
   "homepage": "https://github.com/wagejs/agents-of-empire",

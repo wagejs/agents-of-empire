@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/wagejs/agents-of-empire/security/advisories/new
+    about: Please report vulnerabilities privately, not as an issue.
+  - name: The original project, Bot Crossing
+    url: https://github.com/jarrenrocks/bot-crossing
+    about: For the colony, bots and harness adapters as they are upstream.

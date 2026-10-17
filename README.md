@@ -11,6 +11,7 @@ A fork of [**Bot Crossing**](https://github.com/jarrenrocks/bot-crossing) by Jar
 ([@jarrenrocks](https://github.com/jarrenrocks)), which draws the colony, the bots and the
 harness adapters. This fork adds chat, thread control and multi-repo orchestration.
 
+[![CI](https://github.com/wagejs/agents-of-empire/actions/workflows/ci.yml/badge.svg)](https://github.com/wagejs/agents-of-empire/actions/workflows/ci.yml)
 ![status: alpha](https://img.shields.io/badge/status-alpha-yellow)
 ![licence: MIT](https://img.shields.io/badge/licence-MIT-blue)
 

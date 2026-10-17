@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in the colony, chat or orchestration does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a security problem, please use the Security tab's
+        **Report a vulnerability** instead of an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. npm run dev
+        2. Select a bot and press Enter
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Browser (npm run dev / npm start)
+        - Desktop app (npm run app)
+        - Both
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Colony, rendering or planets
+        - Chat, approvals or modes
+        - Orchestration (plans, repo sessions)
+        - Harness (threads missing or wrong)
+        - File finder
+        - Other
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: macOS 15.5, Node 22.13, Claude Code 2.x, Chrome 141
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Server output from the terminal, and the browser console. Remove anything private, such as repo names or transcript text.
+      render: text

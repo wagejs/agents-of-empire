@@ -1,0 +1,26 @@
+name: Feature request
+description: An idea for the colony, chat, orchestration, a planet or a harness.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a personal project with no promise of acting on requests; see CONTRIBUTING.md.
+        A pull request is the surest way to get something in.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The problem or the moment where you missed this, rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to open a pull request for this.
