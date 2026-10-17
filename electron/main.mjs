@@ -46,7 +46,7 @@ function linkView() {
   if (view) return view
   const ses = session.fromPartition('persist:links')
   // A plain Chrome user agent: some sign-in pages refuse anything that says Electron.
-  ses.setUserAgent(app.userAgentFallback.replace(/\s(?:Electron|Agents of Empire|bot-crossing)\/\S+/g, ''))
+  ses.setUserAgent(app.userAgentFallback.replace(/\s(?:Electron|Agents of Empire|agents-of-empire)\/\S+/g, ''))
   allowOnly(ses, ['clipboard-sanitized-write', 'fullscreen'])
   view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true } })
   const wc = view.webContents

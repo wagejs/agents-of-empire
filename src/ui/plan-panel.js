@@ -11,8 +11,8 @@ import { ICON } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { rememberSize } from './resizable.js'
 
-const LAST_PLAN = 'bot-crossing.last-plan'
-const SIZE = 'bot-crossing.plan-size'
+const LAST_PLAN = 'agents-of-empire.last-plan'
+const SIZE = 'agents-of-empire.plan-size'
 
 const TEMPLATE = `
 <div class="sheet panel">

@@ -6,7 +6,7 @@
  * Whoever changed something last wins. The first browser tab to find the mirror empty fills it,
  * so the setup you already have seeds the app.
  */
-const OWN_KEY = /^bot-?crossing\./
+const OWN_KEY = /^agents-of-empire\./
 
 function snapshot() {
   const pick = (store) => {
@@ -31,7 +31,7 @@ export async function mirrorStorage() {
   let last = JSON.stringify(snapshot())
   const mirror = await fetch('/api/storage').then((r) => r.json()).catch(() => null)
   // Only a browser tab seeds it: the app starting blank must not shadow the setup you have.
-  if (!window.botCrossingApp && mirror && !Object.keys(mirror.local || {}).length) push(last)
+  if (!window.agentsOfEmpireApp && mirror && !Object.keys(mirror.local || {}).length) push(last)
   // ponytail: a 2s poll instead of wrapping every setItem; storage here changes a few times a minute.
   const tick = (keepalive) => {
     const now = JSON.stringify(snapshot())

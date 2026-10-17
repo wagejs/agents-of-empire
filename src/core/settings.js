@@ -6,7 +6,7 @@
  * of keys that moved, so the renderer can rebuild only what actually needs rebuilding.
  */
 
-const STORE_KEY = 'botcrossing.settings.v1'
+const STORE_KEY = 'agents-of-empire.settings.v1'
 
 /**
  * What a fresh install opens on. Fixed rather than guessed from the device: `autoQuality`

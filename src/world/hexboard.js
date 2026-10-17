@@ -224,7 +224,7 @@ export const PAINTS = ['grass', 'road', 'river', 'trees', 'rocks', 'hills', 'pea
 
 /** Where a painted map lives, and the key the editor's live preview uses instead. */
 export const MAP_URL = 'maps/medieval.json'
-export const PREVIEW_KEY = 'bot-crossing.board-map.preview'
+export const PREVIEW_KEY = 'agents-of-empire.board-map.preview'
 
 const cellSeed = (q, r) => (Math.imul(q, 73856093) ^ Math.imul(r, 19349663)) >>> 0
 

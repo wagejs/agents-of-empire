@@ -14,7 +14,7 @@ import { exists, jsonLines, listDirs, readHead, readTail, findExecutable } from 
 
 const HOME = os.homedir()
 const ANTIGRAVITY_HOME =
-  process.env.BOT_CROSSING_ANTIGRAVITY_HOME ||
+  process.env.AGENTS_OF_EMPIRE_ANTIGRAVITY_HOME ||
   process.env.ANTIGRAVITY_HOME ||
   path.join(HOME, '.gemini', 'antigravity-cli')
 const BRAIN_DIR = path.join(ANTIGRAVITY_HOME, 'brain')

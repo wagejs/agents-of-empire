@@ -3,7 +3,7 @@ import { apiMiddleware } from './server/api.mjs'
 
 /** Serves /api from inside the Vite dev server, so `npm run dev` is the whole game. */
 const api = () => ({
-  name: 'bot-crossing-api',
+  name: 'agents-of-empire-api',
   configureServer(server) {
     server.middlewares.use(apiMiddleware)
   },

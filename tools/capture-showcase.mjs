@@ -20,7 +20,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.url === '/start') {
       if (encoder) { res.writeHead(409); res.end('Capture already started'); return }
-      encoder = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'warning', '-y', '-framerate', '30', '-f', 'image2pipe', '-vcodec', 'png', '-i', 'pipe:0', '-an', '-vf', 'scale=out_color_matrix=bt709', '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-metadata', 'title=Bot Crossing — Faces and reflections', partial], { stdio: ['pipe', 'ignore', 'inherit'] })
+      encoder = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'warning', '-y', '-framerate', '30', '-f', 'image2pipe', '-vcodec', 'png', '-i', 'pipe:0', '-an', '-vf', 'scale=out_color_matrix=bt709', '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-metadata', 'title=Agents of Empire — Faces and reflections', partial], { stdio: ['pipe', 'ignore', 'inherit'] })
       encoder.on('error', error => console.error(error))
       res.end('Ready'); return
     }

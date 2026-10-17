@@ -5,14 +5,14 @@
   "type": "module",
   "description": "A 3D colony sim where every coding-agent thread on your machine is a little astronaut building something.",
   "license": "MIT",
-  "author": "Jarren Rocks",
-  "homepage": "https://botcrossing.com",
+  "author": "Muhammad Wage Juli Saputra",
+  "homepage": "https://github.com/wagejs/agents-of-empire",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jarrenrocks/bot-crossing.git"
+    "url": "git+https://github.com/wagejs/agents-of-empire.git"
   },
   "bugs": {
-    "url": "https://github.com/jarrenrocks/bot-crossing/issues"
+    "url": "https://github.com/wagejs/agents-of-empire/issues"
   },
   "keywords": [
     "claude-code",

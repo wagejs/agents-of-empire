@@ -84,7 +84,7 @@ export class Engine {
     this.renderer.info.autoReset = false
 
     this.canvas = this.renderer.domElement
-    this.canvas.classList.add('bot-crossing-canvas')
+    this.canvas.classList.add('agents-of-empire-canvas')
 
     this.composer = null
     this.bloomPass = null

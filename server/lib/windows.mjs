@@ -40,7 +40,7 @@ foreach ($p in Get-CimInstance Win32_Process) { $parent[[int]$p.ProcessId] = [in
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class BotCrossingFocus {
+public static class AgentsOfEmpireFocus {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -56,10 +56,10 @@ for ($i = 0; $i -lt ${MAX_HOPS} -and $cur -gt 0; $i++) {
     # Explorer window would be plain wrong. Either way: stop, let the caller fall back.
     if ($proc.ProcessName -eq 'claude' -or $proc.ProcessName -eq 'explorer') { exit 1 }
     $h = $proc.MainWindowHandle
-    if ([BotCrossingFocus]::IsIconic($h)) { [BotCrossingFocus]::ShowWindowAsync($h, 9) | Out-Null }
-    [BotCrossingFocus]::keybd_event(0xA4, 0, 0, [UIntPtr]::Zero)
-    [BotCrossingFocus]::keybd_event(0xA4, 0, 2, [UIntPtr]::Zero)
-    [BotCrossingFocus]::SetForegroundWindow($h) | Out-Null
+    if ([AgentsOfEmpireFocus]::IsIconic($h)) { [AgentsOfEmpireFocus]::ShowWindowAsync($h, 9) | Out-Null }
+    [AgentsOfEmpireFocus]::keybd_event(0xA4, 0, 0, [UIntPtr]::Zero)
+    [AgentsOfEmpireFocus]::keybd_event(0xA4, 0, 2, [UIntPtr]::Zero)
+    [AgentsOfEmpireFocus]::SetForegroundWindow($h) | Out-Null
     'focused'
     exit 0
   }

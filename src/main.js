@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import './core/legacy-storage.js'
 import './ui/styles.css'
 import { DEFAULT_PRESET, Settings, hasStoredSettings } from './core/settings.js'
 import { Engine } from './core/engine.js'
@@ -54,7 +55,7 @@ const app = document.getElementById('app')
 app.insertAdjacentHTML(
   'beforeend',
   `<div class="boot"><div class="inner">
-     <h1>Bot Crossing</h1>
+     <h1>Agents of Empire</h1>
      <p>Scanning for agent threads…</p>
      <div class="bar"><i></i></div>
    </div></div>`
@@ -110,7 +111,7 @@ const actions = {
     const url = engine.canvas.toDataURL('image/png')
     const a = document.createElement('a')
     a.href = url
-    a.download = `bot-crossing-${colony.planet.id}-${stamp()}.png`
+    a.download = `agents-of-empire-${colony.planet.id}-${stamp()}.png`
     a.click()
     hud.toast('Screenshot saved')
   },
@@ -1322,7 +1323,7 @@ function chimeForNewWaiting(list, archivedSet, hiddenSet) {
       ambience.play('chime-attention', agent ? { x: agent.pos.x, y: agent.pos.y + 1, z: agent.pos.z, gain: 0.9 } : { gain: 0.9 })
     }
   }
-  window.botCrossingApp?.waiting(waiting.size, fresh)
+  window.agentsOfEmpireApp?.waiting(waiting.size, fresh)
   seenFirstRoster = true
   waitingBefore.clear()
   for (const id of waiting) waitingBefore.add(id)
@@ -1419,9 +1420,9 @@ async function boot() {
     if (!document.hidden) poll()
   })
 
-  if (!localStorage.getItem('botcrossing.seen-help')) {
+  if (!localStorage.getItem('agents-of-empire.seen-help')) {
     hud.toggleHelp(true)
-    localStorage.setItem('botcrossing.seen-help', '1')
+    localStorage.setItem('agents-of-empire.seen-help', '1')
   } else {
     hud.hint('Drag to move · click a bot · H hides everything', 5200)
   }
@@ -1524,13 +1525,13 @@ function soundWorld() {
 
 engine.start()
 // In the desktop app: draw nothing while the window is hidden, and a notification click flies to its bot.
-window.botCrossingApp?.onVisible((visible) => (visible ? engine.start() : engine.stop()))
-window.botCrossingApp?.onSelect((id) => select(id, { fly: true }))
+window.agentsOfEmpireApp?.onVisible((visible) => (visible ? engine.start() : engine.stop()))
+window.agentsOfEmpireApp?.onSelect((id) => select(id, { fly: true }))
 boot()
 mirrorStorage()
 
 // Handy for poking at the running colony from the console.
-window.botCrossing = { engine, rig, colony, settings, hud, ambience, poll, get threads() { return threads } }
+window.agentsOfEmpire = { engine, rig, colony, settings, hud, ambience, poll, get threads() { return threads } }
 
 /** `execCommand('copy')` over a throwaway textarea — the copy that predates permissions. */
 function copyFallback(text) {

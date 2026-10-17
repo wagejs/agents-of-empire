@@ -1,7 +1,7 @@
 /**
  * Talking to a Claude Code thread from the page, through the Agent SDK.
  *
- * The one place a thread grows because of Bot Crossing: the SDK resumes the session and Claude
+ * The one place a thread grows because of Agents of Empire: the SDK resumes the session and Claude
  * Code appends the turn to its own transcript, exactly as if it had been typed in a terminal.
  * Nothing here touches a harness file itself.
  *
@@ -23,7 +23,7 @@ import { cliBinary, newChatThread, toolSummary } from './harnesses/claude-code.m
  * re-imports it whenever a server file changes, and a run started under the old copy is still
  * going: a fresh, empty registry would leave it running where no page can ever find it again.
  */
-const shared = (globalThis[Symbol.for('bot-crossing.chat')] ??= { runs: new Map(), pending: new Map() })
+const shared = (globalThis[Symbol.for('agents-of-empire.chat')] ??= { runs: new Map(), pending: new Map() })
 const { runs, pending } = shared
 
 /**
@@ -183,7 +183,7 @@ export const renameThread = (target, title) => renameSession(target.sessionId, t
 /** How a chat from the page introduces itself to Claude Code; see where it is passed. */
 export const CHAT_ENTRYPOINT = 'claude-desktop'
 
-const denial = () => 'Denied in Bot Crossing'
+const denial = () => 'Denied in Agents of Empire'
 
 const errorOf = (m) =>
   (typeof m.result === 'string' && m.result) || (Array.isArray(m.errors) && m.errors.join('; ')) || m.subtype
@@ -573,7 +573,7 @@ async function drive(run, target, text, query) {
         // A turn's end is a turn's end, for the page, even when the session stays.
         if (!event.ok) write({ type: 'note', text: event.error || 'That turn failed' })
         if (run.crons.length) {
-          // ponytail: kept until Stop or until the schedule is empty; the Bot Crossing server
+          // ponytail: kept until Stop or until the schedule is empty; the Agents of Empire server
           // stopping ends it too, as closing the terminal would.
           clearTimeout(settle)
           run.scheduled = true

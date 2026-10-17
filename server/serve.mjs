@@ -7,7 +7,7 @@ import { apiMiddleware } from './api.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.join(here, '..', 'dist')
 const PORT = Number(process.env.PORT) || 5274
-const HOST = process.env.BOT_CROSSING_HOST || '127.0.0.1'
+const HOST = process.env.AGENTS_OF_EMPIRE_HOST || '127.0.0.1'
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',

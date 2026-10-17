@@ -62,7 +62,7 @@ export class Search {
     this.el.innerHTML = TEMPLATE
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
-    rememberSize(this.$('.sheet'), 'bot-crossing.search-size')
+    rememberSize(this.$('.sheet'), 'agents-of-empire.search-size')
     this.box = this.$('.search-box')
     this.results = this.$('.search-results')
 

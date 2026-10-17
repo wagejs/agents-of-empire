@@ -97,12 +97,12 @@ function windowsDataDir() {
  * Both roots take an override, which is how the tests fake an install without touching a real
  * one. `CLAUDE_CONFIG_DIR` is the CLI's own: a shell that sets it has its transcripts written
  * there, so the variable that moves the CLI's home moves where the colony looks for it too.
- * `BOT_CROSSING_CLAUDE_DESKTOP` names the session store itself, the sibling of Cursor's
- * `BOT_CROSSING_CURSOR_PROJECTS`.
+ * `AGENTS_OF_EMPIRE_CLAUDE_DESKTOP` names the session store itself, the sibling of Cursor's
+ * `AGENTS_OF_EMPIRE_CURSOR_PROJECTS`.
  */
 /** Where the Claude desktop app keeps one JSON record per thread. */
 const DESKTOP_SESSIONS =
-  process.env.BOT_CROSSING_CLAUDE_DESKTOP || path.join(desktopDataDir(), 'claude-code-sessions')
+  process.env.AGENTS_OF_EMPIRE_CLAUDE_DESKTOP || path.join(desktopDataDir(), 'claude-code-sessions')
 /** The CLI's home: `~/.claude`, unless the CLI itself has been told otherwise. */
 const CLI_HOME = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude')
 /** Where the CLI keeps the raw transcript: ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl */
@@ -330,11 +330,11 @@ async function scanLiveSessions() {
       /* process is gone */
     }
   }
-  // The sessions Bot Crossing runs itself, from the chat. Their Claude Code processes do not
+  // The sessions Agents of Empire runs itself, from the chat. Their Claude Code processes do not
   // write to the registry above, so without this a session the page is driving reads as not
   // running at all, and its subagents never get looked for. Read off the chat's own registry,
   // shared on `globalThis` (see server/chat.mjs), rather than imported: chat imports this file.
-  for (const run of globalThis[Symbol.for('bot-crossing.chat')]?.runs?.values() || []) {
+  for (const run of globalThis[Symbol.for('agents-of-empire.chat')]?.runs?.values() || []) {
     if (run.done || !run.sessionId) continue
     const status = run.scheduled ? 'idle' : 'busy'
     if (status === 'busy' || !live.has(run.sessionId)) live.set(run.sessionId, status)

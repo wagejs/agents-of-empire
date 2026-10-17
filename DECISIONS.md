@@ -6,7 +6,7 @@ it needs to argue with the reason rather than work around it.
 Written down because the same questions kept arriving one PR at a time, and answering them
 per-PR was producing a codebase with three answers to each.
 
-## Bot Crossing never writes to a harness
+## Agents of Empire never writes to a harness
 
 `data/colony.json` is the only file this project writes, anywhere.
 
@@ -56,7 +56,7 @@ the server decides what to do with it:
 When the page asks for a terminal instead, the URL is not consulted on any platform:
 `command` runs in a terminal, or the page is told the CLI is missing.
 It never falls back to the app, because the person chose a terminal.
-Which terminal is `BOT_CROSSING_TERMINAL`, then `$TERMINAL`, then the desktop's own, then whatever is installed.
+Which terminal is `AGENTS_OF_EMPIRE_TERMINAL`, then `$TERMINAL`, then the desktop's own, then whatever is installed.
 
 `command` is `{ argv, cwd }` with an absolute `argv[0]`, offered on every platform when the CLI can be found.
 No harness knowledge reaches `launch()` — that seam is the reason `server/harnesses/` is swappable at all.

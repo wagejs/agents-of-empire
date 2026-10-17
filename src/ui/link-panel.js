@@ -51,14 +51,14 @@ const FULL_ICON = {
 }
 
 /** The desktop shell's browser view, when the page runs in it. */
-const shell = window.botCrossingApp?.browser
+const shell = window.agentsOfEmpireApp?.browser
 
 export class LinkPanel {
   /**
    * `onClose` runs whenever the panel closes, for a host that should close with it; `sizeKey` is
    * where the size you drag it to is kept, one per place the panel lives.
    */
-  constructor(parent, { onClose = () => {}, sizeKey = 'bot-crossing.link-size' } = {}) {
+  constructor(parent, { onClose = () => {}, sizeKey = 'agents-of-empire.link-size' } = {}) {
     this.onClose = onClose
     this.el = el('div', 'link-panel panel')
     this.el.hidden = true

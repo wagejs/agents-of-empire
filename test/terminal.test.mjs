@@ -17,7 +17,7 @@ const ARGV = ['/bin/true', 'x']
 const posixOnly = { skip: process.platform === 'win32' }
 
 async function withTmp(fn) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-terminal-'))
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-terminal-'))
   try {
     return await fn(dir)
   } finally {
@@ -27,7 +27,7 @@ async function withTmp(fn) {
 
 const nothingInstalled = (dir) => ({
   PATH: dir,
-  BOT_CROSSING_TERMINAL: undefined,
+  AGENTS_OF_EMPIRE_TERMINAL: undefined,
   TERMINAL: undefined,
   XDG_CURRENT_DESKTOP: '',
   DISPLAY: ':0',
@@ -40,11 +40,11 @@ test('openInTerminal refuses anything not already resolved to absolute paths', a
   assert.equal((await openInTerminal(['/bin/ls', 123], '/tmp')).ok, false, 'non-string argument')
 })
 
-test('BOT_CROSSING_TERMINAL wins over $TERMINAL, and the loser is never started', posixOnly, async () => {
+test('AGENTS_OF_EMPIRE_TERMINAL wins over $TERMINAL, and the loser is never started', posixOnly, async () => {
   await withTmp(async (dir) => {
     const kitty = await fakeExecutable(dir, 'kitty')
     const alacritty = await fakeExecutable(dir, 'alacritty')
-    const env = { ...nothingInstalled(dir), BOT_CROSSING_TERMINAL: kitty.file, TERMINAL: alacritty.file }
+    const env = { ...nothingInstalled(dir), AGENTS_OF_EMPIRE_TERMINAL: kitty.file, TERMINAL: alacritty.file }
     const result = await withEnv(env, () => openInTerminal(ARGV, dir))
     assert.equal(result.ok, true)
     assert.deepEqual(await kitty.argv(), [`--directory=${dir}`, ...ARGV])
@@ -56,7 +56,7 @@ test('a named terminal the table does not know is skipped, not guessed at', posi
   await withTmp(async (dir) => {
     const tilix = await fakeExecutable(dir, 'tilix')
     const kitty = await fakeExecutable(dir, 'kitty')
-    const env = { ...nothingInstalled(dir), BOT_CROSSING_TERMINAL: tilix.file, TERMINAL: kitty.file }
+    const env = { ...nothingInstalled(dir), AGENTS_OF_EMPIRE_TERMINAL: tilix.file, TERMINAL: kitty.file }
     await withEnv(env, () => openInTerminal(ARGV, dir))
     assert.equal(await tilix.called(), false)
     assert.deepEqual(await kitty.argv(), [`--directory=${dir}`, ...ARGV])
@@ -67,7 +67,7 @@ test('with no terminal anywhere, the error says which variable to set', posixOnl
   await withTmp(async (dir) => {
     const result = await withEnv(nothingInstalled(dir), () => openInTerminal(ARGV, dir))
     assert.equal(result.ok, false)
-    assert.match(result.error, /BOT_CROSSING_TERMINAL/)
+    assert.match(result.error, /AGENTS_OF_EMPIRE_TERMINAL/)
   })
 })
 
@@ -76,7 +76,7 @@ test('a missing DISPLAY is a refusal on Linux and nothing at all on macOS', posi
     const kitty = await fakeExecutable(dir, 'kitty')
     const headless = {
       ...nothingInstalled(dir),
-      BOT_CROSSING_TERMINAL: kitty.file,
+      AGENTS_OF_EMPIRE_TERMINAL: kitty.file,
       DISPLAY: undefined,
       WAYLAND_DISPLAY: undefined,
       XDG_RUNTIME_DIR: undefined,

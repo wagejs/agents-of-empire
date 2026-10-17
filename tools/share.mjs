@@ -1,7 +1,7 @@
 /**
  * Shared sessions from the command line. Every command reads and writes the store at
- * ~/.claude/.store (BOT_CROSSING_STORE moves it); repos are looked up in ~/projects
- * (BOT_CROSSING_REPOS).
+ * ~/.claude/.store (AGENTS_OF_EMPIRE_STORE moves it); repos are looked up in ~/projects
+ * (AGENTS_OF_EMPIRE_REPOS).
  *
  *   npm run share -- run <plan.md> [--dry] [--only repo,repo] [--model opus|sonnet] [--max-turns N]
  *   npm run share -- status [KEY]

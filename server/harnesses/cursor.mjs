@@ -22,7 +22,7 @@ import os from 'node:os'
 import { exists, jsonLines, listDirs, listFiles, readHead, readTail } from '../lib/fsutil.mjs'
 
 const HOME = os.homedir()
-const PROJECTS = process.env.BOT_CROSSING_CURSOR_PROJECTS || path.join(HOME, '.cursor', 'projects')
+const PROJECTS = process.env.AGENTS_OF_EMPIRE_CURSOR_PROJECTS || path.join(HOME, '.cursor', 'projects')
 const TRANSCRIPTS = 'agent-transcripts'
 
 const HEAD_BYTES = 96 * 1024

@@ -137,7 +137,7 @@ function trySpawn(cmd, args, cwd) {
  * Run `argv` in a new terminal window with `cwd` as its working directory.
  *
  * The caller has already resolved both: `argv[0]` is an absolute executable and `cwd` an
- * existing directory. Which terminal is up to the machine — `BOT_CROSSING_TERMINAL` if set, then
+ * existing directory. Which terminal is up to the machine — `AGENTS_OF_EMPIRE_TERMINAL` if set, then
  * `$TERMINAL`, then the desktop's own, then whatever is installed, then Debian's
  * `x-terminal-emulator` alternative. That last is tried by name and given `-e`, the one form
  * Debian policy guarantees, because on Ubuntu it is a wrapper script that knows no other flags —
@@ -168,7 +168,7 @@ export async function openInTerminal(argv, cwd) {
   }
 
   const preferred = [
-    process.env.BOT_CROSSING_TERMINAL || '',
+    process.env.AGENTS_OF_EMPIRE_TERMINAL || '',
     process.env.TERMINAL || '',
     ...desktopOrder(),
     ...GENERAL_ORDER,
@@ -207,6 +207,6 @@ export async function openInTerminal(argv, cwd) {
     ok: false,
     error: lastError
       ? `Could not open a terminal (${lastError})`
-      : 'No terminal emulator found — set BOT_CROSSING_TERMINAL or $TERMINAL, or install one (gnome-terminal, kitty, xterm)',
+      : 'No terminal emulator found — set AGENTS_OF_EMPIRE_TERMINAL or $TERMINAL, or install one (gnome-terminal, kitty, xterm)',
   }
 }

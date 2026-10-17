@@ -71,7 +71,7 @@ export function classify(toolName, input = {}, rules = []) {
 // ---------------------------------------------------------------------------------------------
 // Asks waiting for you, and the record of your answers
 
-const shared = (globalThis[Symbol.for('bot-crossing.permit')] ??= { pending: new Map(), listeners: new Set() })
+const shared = (globalThis[Symbol.for('agents-of-empire.permit')] ??= { pending: new Map(), listeners: new Set() })
 
 /** Hear about each new ask: the orchestrator is told through this. */
 export const onAsk = (fn) => (shared.listeners.clear(), shared.listeners.add(fn))

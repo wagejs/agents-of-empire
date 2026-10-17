@@ -154,7 +154,7 @@ export class FileView {
   constructor(parent) {
     this.el = el('div', 'chat file-view')
     parent.append(this.el)
-    this.panel = new LinkPanel(this.el, { onClose: () => this.el.classList.remove('open'), sizeKey: 'bot-crossing.file-size' })
+    this.panel = new LinkPanel(this.el, { onClose: () => this.el.classList.remove('open'), sizeKey: 'agents-of-empire.file-size' })
     this.el.addEventListener('click', (e) => e.target === this.el && this.close())
   }
 

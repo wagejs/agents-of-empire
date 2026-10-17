@@ -24,7 +24,7 @@ import {
 } from './scan.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = process.env.BOT_CROSSING_DATA || path.join(here, '..', 'data')
+const DATA_DIR = process.env.AGENTS_OF_EMPIRE_DATA || path.join(here, '..', 'data')
 const STATE_FILE = path.join(DATA_DIR, 'colony.json')
 
 /**
@@ -32,7 +32,7 @@ const STATE_FILE = path.join(DATA_DIR, 'colony.json')
  * here so the desktop app starts where the browser tab left off. The keys are the page's only.
  */
 export const STORAGE_FILE = path.join(DATA_DIR, 'storage.json')
-const OWN_KEY = /^bot-?crossing\./
+const OWN_KEY = /^agents-of-empire\./
 
 export function cleanStorage(body) {
   const pick = (o) =>
@@ -71,7 +71,7 @@ function migrate(raw) {
  * Colony state is only ever the things the *game* invents — which plot a project got,
  * what a thread's building looks like, what you archived, which repos you took off the map.
  * The threads themselves stay
- * read-only: this file is the only thing Bot Crossing writes, anywhere.
+ * read-only: this file is the only thing Agents of Empire writes, anywhere.
  */
 const emptyState = () => ({
   version: STATE_VERSION,
@@ -288,7 +288,7 @@ const viaOf = (body) => (body?.via === 'terminal' ? 'terminal' : 'app')
 /**
  * Mark the threads the colony has retired.
  *
- * Nothing is written anywhere. Bot Crossing used to set `isArchived` on the desktop app's own
+ * Nothing is written anywhere. Agents of Empire used to set `isArchived` on the desktop app's own
  * session record, and it did land on disk — but the app serves from the copy it loaded at
  * launch, so the thread stayed put in its own list until the next restart, and the app would
  * rewrite the record from memory whenever it touched the thread. Papering over that took a
@@ -345,7 +345,7 @@ function send(res, status, body) {
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
 
 // The machine's own LAN addresses count as local too, so the colony can be
-// served to the home network with BOT_CROSSING_HOST set. Harmless when bound
+// served to the home network with AGENTS_OF_EMPIRE_HOST set. Harmless when bound
 // to loopback (those hosts can't reach the server anyway), and the Host +
 // Origin pairing still stops DNS rebinding and CSRF exactly as before.
 for (const addrs of Object.values(os.networkInterfaces())) {
@@ -421,7 +421,7 @@ const TITLE_MAX = 200
 /**
  * The calls that act on a Claude Code session through the SDK: starting one, reading it,
  * sending to it, answering its approvals, renaming it. Chat can run tools on this machine, so it answers this machine
- * only, even when `BOT_CROSSING_HOST` has put the rest of the colony on the network. The Host
+ * only, even when `AGENTS_OF_EMPIRE_HOST` has put the rest of the colony on the network. The Host
  * and Origin checks have already run by the time a request gets here.
  */
 /**
@@ -591,7 +591,7 @@ async function chat(pathname, req, res) {
     const running = activeRun(target.sessionId)
     if (running) {
       if (!queueMessage(running, text)) {
-        return send(res, 409, { ok: false, error: 'This reply started before Bot Crossing could queue messages. Wait for it to finish, then send' })
+        return send(res, 409, { ok: false, error: 'This reply started before Agents of Empire could queue messages. Wait for it to finish, then send' })
       }
       return send(res, 200, { runId: running.id, queued: true })
     }
@@ -609,7 +609,7 @@ export async function apiMiddleware(req, res, next) {
   if (!url.pathname.startsWith('/api/')) return next ? next() : send(res, 404, { error: 'Not found' })
 
   if (!isLocalRequest(req)) {
-    return send(res, 403, { error: 'Bot Crossing only answers its own page on this machine' })
+    return send(res, 403, { error: 'Agents of Empire only answers its own page on this machine' })
   }
 
   try {

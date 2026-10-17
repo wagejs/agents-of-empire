@@ -1,4 +1,4 @@
-/* Bot Crossing — HUD.
+/* Agents of Empire — HUD.
    Everything here is chrome that can be dismissed with H. The only thing that survives is
    in the 3D scene itself, so nothing in this file may ever be load-bearing for reading the
    colony's state. */
@@ -44,7 +44,7 @@ body {
   user-select: none;
 }
 
-.bot-crossing-canvas {
+.agents-of-empire-canvas {
   position: absolute;
   inset: 0;
   /* A canvas is a replaced element: with `inset: 0` alone its *intrinsic* size — the
@@ -2501,7 +2501,7 @@ kbd {
     transition-duration: 0.01ms !important;
   }
 }
-.bot-crossing-canvas { cursor: grab; }
+.agents-of-empire-canvas { cursor: grab; }
 
 /* ── run a plan ──────────────────────────────────────────────────────────────────── */
 

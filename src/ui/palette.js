@@ -17,8 +17,8 @@ import { rememberSize } from './resizable.js'
 import { fuzzy, splitLine } from '../game/fuzzy.js'
 
 const LIMIT = 60
-const RECENT_KEY = 'bot-crossing.files.recent'
-const SCOPE_KEY = 'bot-crossing.files.scope'
+const RECENT_KEY = 'agents-of-empire.files.recent'
+const SCOPE_KEY = 'agents-of-empire.files.scope'
 
 const el = (tag, className, text) => {
   const e = document.createElement(tag)
@@ -89,7 +89,7 @@ export class Palette {
     this.el.innerHTML = TEMPLATE
     parent.append(this.el)
     this.$ = (s) => this.el.querySelector(s)
-    rememberSize(this.$('.sheet'), 'bot-crossing.palette-size')
+    rememberSize(this.$('.sheet'), 'agents-of-empire.palette-size')
     this.box = this.$('.search-box')
     this.results = this.$('.search-results')
     this.scopeEl = this.$('.palette-scope')

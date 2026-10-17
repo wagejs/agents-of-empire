@@ -12,8 +12,8 @@ import path from 'node:path'
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'conductor-'))
 const reposDir = path.join(tmp, 'repos')
-process.env.BOT_CROSSING_STORE = path.join(tmp, 'store')
-process.env.BOT_CROSSING_REPOS = reposDir
+process.env.AGENTS_OF_EMPIRE_STORE = path.join(tmp, 'store')
+process.env.AGENTS_OF_EMPIRE_REPOS = reposDir
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude')
 await fsp.mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true })
 

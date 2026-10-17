@@ -87,7 +87,7 @@ export async function scanThreads() {
         const threads = await h.scanThreads()
         return threads.map((t) => ({ ...t, harness: h.id, harnessName: h.name }))
       } catch (err) {
-        console.warn(`bot-crossing: harness "${h.id}" failed to scan —`, err?.message || err)
+        console.warn(`agents-of-empire: harness "${h.id}" failed to scan —`, err?.message || err)
         return []
       }
     })

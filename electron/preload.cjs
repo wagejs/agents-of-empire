@@ -12,7 +12,7 @@ try {
 
 const on = (channel) => (cb) => ipcRenderer.on(channel, (_e, value) => cb(value))
 
-contextBridge.exposeInMainWorld('botCrossingApp', {
+contextBridge.exposeInMainWorld('agentsOfEmpireApp', {
   waiting: (count, fresh) => ipcRenderer.send('waiting', count, fresh),
   onVisible: on('visible'),
   onSelect: on('select'),

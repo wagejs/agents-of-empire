@@ -68,7 +68,7 @@ export const LOOP_MODE = 'bypassPermissions'
  * not landed, and a session nobody can find by name is one nobody stops, its timer still live.
  */
 export function loopRuns(skill) {
-  const runs = globalThis[Symbol.for('bot-crossing.chat')]?.runs?.values() || []
+  const runs = globalThis[Symbol.for('agents-of-empire.chat')]?.runs?.values() || []
   return [...runs].filter(
     (run) => !run.done && (run.loop === skill || new RegExp(`^/${skill}(\\s|$)`).test(String(run.prompt || '').trim()))
   )

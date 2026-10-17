@@ -67,7 +67,7 @@ test('codex opens through the registered scheme and prefixes its ids', async () 
  * install dirs — so it wins even on a machine that has the real one in `/usr/bin`.
  */
 async function withFakeCli(name, fn) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-cli-'))
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-cli-'))
   try {
     const cli = await fakeExecutable(dir, name)
     return await withEnv({ PATH: dir }, () => fn(cli.file))
@@ -103,7 +103,7 @@ test('codex offers `codex resume <id>` in the thread cwd alongside its deep link
 })
 
 test('codex with no CLI installed offers the deep link alone', posixOnly, async () => {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-nocli-'))
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-nocli-'))
   try {
     const opened = await withEnv({ PATH: dir }, () => codex.openThread({ sessionId: SESSION_ID }))
     assert.deepEqual(opened, { ok: true, url: `codex://threads/${SESSION_ID}`, command: undefined })
@@ -295,7 +295,7 @@ async function fakeCursor(dirName, records) {
 }
 
 async function cursorWith(home) {
-  process.env.BOT_CROSSING_CURSOR_PROJECTS = home
+  process.env.AGENTS_OF_EMPIRE_CURSOR_PROJECTS = home
   const mod = await import(`../server/harnesses/cursor.mjs?${home}`)
   return mod.default
 }
@@ -544,7 +544,7 @@ async function fakeAntigravity(records) {
 }
 
 async function antigravityWith(home) {
-  process.env.BOT_CROSSING_ANTIGRAVITY_HOME = home
+  process.env.AGENTS_OF_EMPIRE_ANTIGRAVITY_HOME = home
   const mod = await import(`../server/harnesses/antigravity.mjs?${home}`)
   return mod.default
 }
@@ -590,7 +590,7 @@ test('Antigravity opens through antigravity:// scheme and handles invalid refs',
 
 /**
  * Both stores under one temp root: the CLI's home (`CLAUDE_CONFIG_DIR`, so `projects/` and
- * `sessions/` sit inside it) and the desktop app's session store (`BOT_CROSSING_CLAUDE_DESKTOP`),
+ * `sessions/` sit inside it) and the desktop app's session store (`AGENTS_OF_EMPIRE_CLAUDE_DESKTOP`),
  * with one transcript for SESSION_ID and whatever records and deletion markers a test asks for.
  */
 async function fakeClaude({ transcript, records = [], deleted = [] }) {
@@ -610,7 +610,7 @@ async function fakeClaude({ transcript, records = [], deleted = [] }) {
 
 async function claudeWith({ configDir, desktop }) {
   process.env.CLAUDE_CONFIG_DIR = configDir
-  process.env.BOT_CROSSING_CLAUDE_DESKTOP = desktop
+  process.env.AGENTS_OF_EMPIRE_CLAUDE_DESKTOP = desktop
   const mod = await import(`../server/harnesses/claude-code.mjs?${configDir}`)
   return mod.default
 }

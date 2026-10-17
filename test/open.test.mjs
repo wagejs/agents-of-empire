@@ -48,11 +48,11 @@ test("an adapter's own refusal passes through whatever the page asked for", asyn
 // ── the endpoints, against a real socket ──────────────────────────────────────
 
 async function withFakes(fn) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-open-'))
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-open-'))
   try {
     const claude = await fakeExecutable(dir, 'claude')
     const kitty = await fakeExecutable(dir, 'kitty')
-    const env = { PATH: dir, BOT_CROSSING_TERMINAL: kitty.file, DISPLAY: ':0' }
+    const env = { PATH: dir, AGENTS_OF_EMPIRE_TERMINAL: kitty.file, DISPLAY: ':0' }
     return await withEnv(env, () => fn({ dir, claude, kitty }))
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
@@ -75,7 +75,7 @@ test('/api/open with via: terminal resumes the session in its own folder', posix
 
 test('/api/open with via: terminal and no CLI is a 400 that names the CLI', posixOnly, async () => {
   // Codex rather than Claude Code: this machine may well have a real `claude` in an install dir.
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-nocli-'))
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-nocli-'))
   try {
     await withEnv({ PATH: dir }, () =>
       withServer(async ({ call }) => {

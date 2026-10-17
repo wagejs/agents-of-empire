@@ -1,6 +1,6 @@
 /** The search panel's matcher, kept apart from the DOM so it can be tested on its own. */
 
-/** Each word must appear somewhere in the row, so `bot chat` finds "chat popup" in bot-crossing. */
+/** Each word must appear somewhere in the row, so `bot chat` finds "chat popup" in agents-of-empire. */
 export function matches(row, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return true

@@ -48,7 +48,7 @@ You are the orchestrator for shared sessions. Each repo in a plan gets its own C
 // ---------------------------------------------------------------------------------------------
 // Which sessions are orchestrators
 
-const shared = (globalThis[Symbol.for('bot-crossing.conductor')] ??= { plans: new Map() })
+const shared = (globalThis[Symbol.for('agents-of-empire.conductor')] ??= { plans: new Map() })
 shared.jobs ??= new Map()
 
 function registryFile(store) {

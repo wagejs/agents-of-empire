@@ -140,7 +140,7 @@ function toolLine(name, summary) {
   return el
 }
 
-const STORE_KEY = 'bot-crossing.chat'
+const STORE_KEY = 'agents-of-empire.chat'
 
 /** Which thread's chat this tab had open. Storage can be missing or refuse; then nothing is kept. */
 function remember(id) {
@@ -161,7 +161,7 @@ export function lastChat() {
   }
 }
 
-const MODES_KEY = 'bot-crossing.chat-modes'
+const MODES_KEY = 'agents-of-empire.chat-modes'
 
 /**
  * Each thread's permission mode, kept in this browser like its size. What each one means:
@@ -188,9 +188,9 @@ function saveModes(modes, key = MODES_KEY) {
 }
 
 /** Each thread's model pick, kept the same way; '' is whatever the thread runs by default. */
-const MODELS_KEY = 'bot-crossing.chat-models'
+const MODELS_KEY = 'agents-of-empire.chat-models'
 
-const SIZES_KEY = 'bot-crossing.chat-sizes'
+const SIZES_KEY = 'agents-of-empire.chat-sizes'
 
 /**
  * How big you made each thread's chat, kept in this browser. Keyed by thread id, or by folder

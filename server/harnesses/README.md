@@ -1,7 +1,7 @@
 # Harness adapters
 
 A **harness** is whatever runs the agent threads you want to see as bots — Claude Code,
-Codex CLI, OpenCode, and so on. Bot Crossing does not care which one you use: it asks every
+Codex CLI, OpenCode, and so on. Agents of Empire does not care which one you use: it asks every
 harness present on the machine for its threads and draws whatever comes back.
 
 Adding one is meant to be **one new file in this directory**, plus one line in `index.mjs`.
@@ -62,7 +62,7 @@ shows the message rather than pretending the click worked.
 
 ### There is no `setArchived`, and that is deliberate
 
-Bot Crossing does not write to a harness. Not the transcripts, not the session records, not one
+Agents of Empire does not write to a harness. Not the transcripts, not the session records, not one
 flag. Archiving is recorded in `data/colony.json` and nowhere else: the thread leaves the map and
 the bot walks back to the ship.
 
@@ -117,7 +117,7 @@ Do not put a file handle, a class instance, or a secret in it.
 
 ## Ground rules
 
-- **Read-only. No exceptions.** `data/colony.json` is the only file Bot Crossing writes,
+- **Read-only. No exceptions.** `data/colony.json` is the only file Agents of Empire writes,
   anywhere. A harness's transcripts and records are somebody's actual work; the colony is a
   viewer, not an editor. If an adapter seems to need a write, it does not — say so in an issue.
   Chat does not break this: the adapter only reads, and the turn is appended by Claude Code
@@ -147,7 +147,7 @@ Verified on a real machine:
   deleted thread from one started in a terminal, so the adapter reports it as `archived`; CLI
   transcripts in `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`; live processes in
   `~/.claude/sessions/*.json`. `CLAUDE_CONFIG_DIR` (the CLI's own override for `~/.claude`) and
-  `BOT_CROSSING_CLAUDE_DESKTOP` (the session store) point both roots elsewhere, which is how
+  `AGENTS_OF_EMPIRE_CLAUDE_DESKTOP` (the session store) point both roots elsewhere, which is how
   `test/harness.test.mjs` fakes an install. Implemented in `claude-code.mjs`.
 - **Codex CLI** — transcripts in `~/.codex/sessions/YYYY/MM/DD/rollout-<iso>-<uuid>.jsonl`,
   with records shaped `{ timestamp, type, payload }`, and what looks like an index at

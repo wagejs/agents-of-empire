@@ -3,7 +3,7 @@
  * animations the colony actually plays.
  *
  * The Character Animations pack ships 161 clips across eight files and four megabytes.
- * Bot Crossing has eight behaviours. Everything not on the list below is disposed here rather
+ * Agents of Empire has eight behaviours. Everything not on the list below is disposed here rather
  * than downloaded and thrown away in the browser.
  *
  * Both packs are CC0 (Kay Lousberg, kaylousberg.com).

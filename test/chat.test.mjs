@@ -33,7 +33,7 @@ await fsp.writeFile(path.join(project, `${SESSION_ID}.jsonl`), transcript.map((r
 
 // The adapter reads its paths once, on first import, and the server shares that import.
 process.env.CLAUDE_CONFIG_DIR = configDir
-process.env.BOT_CROSSING_CLAUDE_DESKTOP = path.join(root, 'no-desktop-app')
+process.env.AGENTS_OF_EMPIRE_CLAUDE_DESKTOP = path.join(root, 'no-desktop-app')
 const { default: claudeCode } = await import('../server/harnesses/claude-code.mjs')
 const { activeRun, alwaysRule, answerPermission, attachRun, chatStatus, eventsOf, getRun, modeOf, queueMessage, setRunMode, settledBy, startRun, stopRun } = await import('../server/chat.mjs')
 

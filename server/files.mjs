@@ -2,7 +2,7 @@
  * The ⌘P browser's side of things: every file in the repos under one root folder, listed, read
  * and searched, so the page can find and show any of them.
  *
- * The root is `~/projects` unless BOT_CROSSING_FILES_ROOT says otherwise. Each folder
+ * The root is `~/projects` unless AGENTS_OF_EMPIRE_FILES_ROOT says otherwise. Each folder
  * directly inside it is a repo. A git worktree (a folder whose `.git` is a file, or one named
  * `…-wt`) is a copy of a repo already listed, so it is left out, as are hidden folders.
  *
@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { findExecutable } from './lib/fsutil.mjs'
 
-export const FILES_ROOT = path.resolve(process.env.BOT_CROSSING_FILES_ROOT || path.join(os.homedir(), 'projects'))
+export const FILES_ROOT = path.resolve(process.env.AGENTS_OF_EMPIRE_FILES_ROOT || path.join(os.homedir(), 'projects'))
 
 const MAX_READ_BYTES = 2 * 1024 * 1024
 const MAX_WALK_FILES = 20_000

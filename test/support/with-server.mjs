@@ -5,8 +5,8 @@ import http from 'node:http'
 
 /** `call` sets the `Origin` header the same-origin check expects, so a test never trips it by accident. */
 export async function withServer(run) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'bot-crossing-test-'))
-  process.env.BOT_CROSSING_DATA = dir
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'agents-of-empire-test-'))
+  process.env.AGENTS_OF_EMPIRE_DATA = dir
   // Imported per-server so DATA_DIR is read fresh; the query string defeats the module cache.
   const { apiMiddleware } = await import(`../../server/api.mjs?${dir}`)
   const server = http.createServer((req, res) => apiMiddleware(req, res, null))

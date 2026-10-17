@@ -8,7 +8,7 @@
  *   sessions/<name>/  brief.md, thread.md, report.md, question.md, state.json
  *
  * It lives beside Claude Code's own config, `~/.claude/.store` (or `$CLAUDE_CONFIG_DIR/.store`),
- * so anything on the machine can read it. `BOT_CROSSING_STORE` moves it; the tests do.
+ * so anything on the machine can read it. `AGENTS_OF_EMPIRE_STORE` moves it; the tests do.
  *
  * A note is never deleted. Replacing one marks it `superseded` and links it to its successor.
  * The graph of notes is never stored either: `buildGraph` derives it from the notes' `links`.
@@ -30,10 +30,10 @@ export const CONFIDENCES = ['EXTRACTED', 'INFERRED', 'AMBIGUOUS']
 export const STALE = 'stale_code_ref'
 
 export const defaultStoreRoot = () =>
-  process.env.BOT_CROSSING_STORE || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), '.store')
+  process.env.AGENTS_OF_EMPIRE_STORE || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), '.store')
 
 /** Where repos named by bare name live. */
-export const defaultReposDir = () => process.env.BOT_CROSSING_REPOS || path.join(os.homedir(), 'projects')
+export const defaultReposDir = () => process.env.AGENTS_OF_EMPIRE_REPOS || path.join(os.homedir(), 'projects')
 
 /** The CLI that rebuilds a graph: your own install first, since a server's PATH rarely has `~/.local/bin`. */
 const graphifyBin = () => {

@@ -66,7 +66,7 @@ written down here.
 
 ## What is most worth contributing
 
-**Harness adapters, by a wide margin.** Bot Crossing reads Claude Code and Codex. The whole
+**Harness adapters, by a wide margin.** Agents of Empire reads Claude Code and Codex. The whole
 point of the seam in `server/harnesses/` is that adding OpenCode, Antigravity, Amp, Cursor or
 anything else should be one new file and one line in a registry.
 

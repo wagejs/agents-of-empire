@@ -10,7 +10,7 @@ const row = {
   thread: {
     title: 'Add a chat popup',
     preview: 'instead of opening the claude app, show a popup',
-    project: 'bot-crossing',
+    project: 'agents-of-empire',
     gitBranch: 'feature/chat',
     harnessName: 'Claude Code',
   },
@@ -18,7 +18,7 @@ const row = {
 
 test('every word must match somewhere, in any order and any case', () => {
   assert.equal(matches(row, ''), true)
-  assert.equal(matches(row, 'CROSSING popup'), true)
+  assert.equal(matches(row, 'EMPIRE popup'), true)
   assert.equal(matches(row, 'feature/chat dormant'), true)
   assert.equal(matches(row, 'popup projects'), false)
 })
