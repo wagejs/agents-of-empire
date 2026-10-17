@@ -44,7 +44,12 @@ const FACE_DISTANCE = 2.5
 
 /**
  * Head-and-shoulders pictures of each skeleton, for the agent card: one throwaway renderer,
- * four renders, then let go. Missing when WebGL is not on offer; the card keeps its face then.
+ * two renders per skeleton, then let go. Missing when WebGL is not on offer; the card keeps
+ * its face then.
+ *
+ * The cloth is the repo's colour, which a picture taken once cannot know. So each skeleton
+ * comes as a `base` with the cloth in grey and a `mask` of where the cloth shows; the card
+ * multiplies the mask's colour in. See `HUD.updateAvatar`.
  */
 function portraits(gltfs) {
   let renderer
@@ -55,6 +60,30 @@ function portraits(gltfs) {
   }
   renderer.setSize(PORTRAIT, PORTRAIT, false)
   renderer.outputColorSpace = THREE.SRGBColorSpace
+  const uMask = { value: 0 }
+  const greyCloth = (shader) => {
+    shader.uniforms.uMask = uMask
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uMask;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         vec2 clothCell = floor( vMapUv * vec2( 8.0, 4.0 ) );
+         float cloth = step( abs( clothCell.x - ${CLOTH_CELL[0]}.0 ) + abs( clothCell.y - ${CLOTH_CELL[1]}.0 ), 0.5 );
+         float clothLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) / ${CLOTH_LUM};
+         diffuseColor.rgb = mix( diffuseColor.rgb, vec3( clamp( clothLum, 0.2, 1.2 ) ), cloth );`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        '#include <dithering_fragment>\nif ( uMask > 0.5 ) gl_FragColor = vec4( vec3( cloth ), cloth );'
+      )
+  }
+  const snap = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = PORTRAIT
+    canvas.getContext('2d').drawImage(renderer.domElement, 0, 0)
+    return canvas
+  }
   const out = {}
   gltfs.forEach((gltf, i) => {
     const scene = new THREE.Scene()
@@ -62,6 +91,9 @@ function portraits(gltfs) {
     const sun = new THREE.DirectionalLight(0xffffff, 2)
     sun.position.set(1.5, 3, 4)
     scene.add(sun, gltf.scene)
+    gltf.scene.traverse((o) => {
+      if (o.material?.map) o.material.onBeforeCompile = greyCloth
+    })
     gltf.scene.updateMatrixWorld(true)
     // Framed on the head bone, not the bounding box, so a tall hat does not shove the face down.
     const head = new THREE.Vector3()
@@ -70,11 +102,12 @@ function portraits(gltfs) {
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50)
     camera.position.set(head.x + FACE_DISTANCE * 0.3, head.y + 0.15, head.z + FACE_DISTANCE)
     camera.lookAt(head)
+    uMask.value = 0
     renderer.render(scene, camera)
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = PORTRAIT
-    canvas.getContext('2d').drawImage(renderer.domElement, 0, 0)
-    out[SKELETON_TYPES[i]] = canvas
+    const base = snap()
+    uMask.value = 1
+    renderer.render(scene, camera)
+    out[SKELETON_TYPES[i]] = { base, mask: snap() }
     scene.remove(gltf.scene)
   })
   renderer.dispose()
@@ -144,7 +177,16 @@ export function mergeSkeleton(scene, boneIndex) {
 }
 
 /**
- * Light the eyes in the instance colour and leave the rest of the bones their texture.
+ * The crimson cloth swatch of the KayKit atlas (8x4 cells, column 2, row 2 from the top):
+ * the mage's hat and robe, the rogue's hood and cape, the warrior's cloak and plume.
+ */
+export const CLOTH_CELL = [2, 2]
+/** That swatch's top luminance in linear space, so its gradient survives the repaint. */
+const CLOTH_LUM = 0.11
+
+/**
+ * Light the eyes in the instance colour, repaint the cloth in the repo's accent (`aAccent`),
+ * and leave the rest of the bones their texture.
  * Goes on top of `decorateSkinned`, so it wraps whatever compile hook is already there.
  */
 export function withGlowingEyes(material) {
@@ -152,11 +194,21 @@ export function withGlowingEyes(material) {
   material.onBeforeCompile = (shader, renderer) => {
     base?.(shader, renderer)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;')
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute float aGlow;\nattribute vec3 aAccent;\nvarying float vGlow;\nvarying vec3 vAccent;'
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;\nvAccent = aAccent;')
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vGlow;')
-      .replace('#include <color_fragment>', 'diffuseColor.rgb *= mix( vec3( 1.0 ), vColor.rgb, vGlow );')
+      .replace('#include <common>', '#include <common>\nvarying float vGlow;\nvarying vec3 vAccent;')
+      .replace(
+        '#include <color_fragment>',
+        `vec2 clothCell = floor( vMapUv * vec2( 8.0, 4.0 ) );
+         float cloth = step( abs( clothCell.x - ${CLOTH_CELL[0]}.0 ) + abs( clothCell.y - ${CLOTH_CELL[1]}.0 ), 0.5 ) * ( 1.0 - vGlow );
+         float clothLum = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) / ${CLOTH_LUM};
+         diffuseColor.rgb = mix( diffuseColor.rgb, vAccent * clamp( clothLum, 0.2, 1.2 ), cloth );
+         diffuseColor.rgb *= mix( vec3( 1.0 ), vColor.rgb, vGlow );`
+      )
       .replace(
         '#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor.rgb * vGlow * 1.4;'

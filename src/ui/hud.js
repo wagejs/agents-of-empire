@@ -1000,12 +1000,15 @@ export class Hud {
   updateAvatar(faceAtlasCanvas, portraits) {
     if (!this.selected || !faceAtlasCanvas) return
     const agent = this.selected.agent
-    // A skeleton shows its own portrait, framed in its eye colour, which is its status.
+    // A skeleton shows its own portrait, framed in its eye colour, which is its status, and
+    // with its cloth in its repo's colour, as it wears it on the map.
     const portrait = portraits?.[agent.skeleton]
     if (portrait) {
       const css = cssFromGlow(agent.eye)
-      if (this._avatarState.frame === agent.skeleton && this._avatarState.color === css) return
-      this._avatarState = { frame: agent.skeleton, color: css }
+      const cloth = `#${agent.accent?.getHexString() ?? 'ffffff'}`
+      const key = `${agent.skeleton}:${cloth}`
+      if (this._avatarState.frame === key && this._avatarState.color === css) return
+      this._avatarState = { frame: key, color: css }
       const c = this.avatarCtx
       const size = 108
       const glow = c.createRadialGradient(size / 2, size * 0.45, 4, size / 2, size / 2, size * 0.7)
@@ -1018,7 +1021,18 @@ export class Hud {
       c.fillStyle = glow
       c.fillRect(0, 0, size, size)
       c.globalAlpha = 1
-      c.drawImage(portrait, 0, 0, size, size)
+      c.drawImage(portrait.base, 0, 0, size, size)
+      const t = this.avatarTmpCtx
+      t.globalCompositeOperation = 'source-over'
+      t.clearRect(0, 0, size, size)
+      t.drawImage(portrait.mask, 0, 0, size, size)
+      t.globalCompositeOperation = 'source-in'
+      t.fillStyle = cloth
+      t.fillRect(0, 0, size, size)
+      t.globalCompositeOperation = 'source-over'
+      c.globalCompositeOperation = 'multiply'
+      c.drawImage(t.canvas, 0, 0)
+      c.globalCompositeOperation = 'source-over'
       return
     }
     const frame = agent.faceFrame ?? FACE.idle

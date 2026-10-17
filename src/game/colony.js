@@ -616,6 +616,8 @@ export class Colony {
           anchor: building.mesh.position.clone(),
           // Already on the colony's books, so it does not need an entrance.
           known: knownIds.has(thread.id),
+          // The repo's colour, so a skeleton's cloth matches its plot and buildings.
+          accent: plot.accent,
         })
       })
     }

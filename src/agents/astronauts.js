@@ -362,6 +362,9 @@ export class Astronauts {
       const frames = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1)
       frames.setUsage(THREE.DynamicDrawUsage)
       geo.setAttribute('aFrame', frames)
+      const accent = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * 3).fill(1), 3)
+      accent.setUsage(THREE.DynamicDrawUsage)
+      geo.setAttribute('aAccent', accent)
       const mesh = new THREE.InstancedMesh(geo, material, this.capacity)
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
       for (let i = 0; i < this.capacity; i++) mesh.setColorAt(i, white)
@@ -371,6 +374,7 @@ export class Astronauts {
       mesh.frustumCulled = false
       mesh.receiveShadow = false
       mesh.userData.frames = frames
+      mesh.userData.accent = accent
       this.skeletons[type] = mesh
       this.group.add(mesh)
     }
@@ -683,6 +687,7 @@ export class Astronauts {
       skeleton: entry.thread?.parentId ? 'minion' : HEROES[(hash(entry.id) >>> 7) % HEROES.length],
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
+      accent: new THREE.Color(entry.accent ?? 0xffffff),
       hop: 0,
       // Ground tracking. `groundAt` is the height last sampled and `groundY` the eased value
     // actually stood on; both start null so the first frame snaps instead of easing up.
@@ -741,6 +746,7 @@ export class Astronauts {
 
   _updateAgent(agent, entry) {
     agent.thread = entry.thread
+    if (entry.accent != null) agent.accent.set(entry.accent)
     if (entry.site) {
       // Measured against the site the roster last handed over, not the one being stood at:
       // an astronaut that gave up on an unreachable site and adopted the ground it reached
@@ -1571,6 +1577,7 @@ export class Astronauts {
         mesh.setMatrixAt(j, root)
         mesh.userData.frames.array[j] = agent.frame
         mesh.setColorAt(j, agent.eye)
+        mesh.userData.accent.setXYZ(j, agent.accent.r, agent.accent.g, agent.accent.b)
       } else if (crew) {
         crew.setMatrixAt(i, root)
         crewFrames[i] = agent.frame
@@ -1656,6 +1663,7 @@ export class Astronauts {
       mesh.instanceMatrix.needsUpdate = true
       mesh.instanceColor.needsUpdate = true
       mesh.userData.frames.needsUpdate = true
+      mesh.userData.accent.needsUpdate = true
     }
     if (crew) {
       crew.count = skeletons ? 0 : n
