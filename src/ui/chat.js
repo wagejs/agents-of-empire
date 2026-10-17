@@ -9,11 +9,12 @@
  * and opening its thread again picks it up with everything it said in the meantime. Only Stop
  * ends one early. Which chat was open is remembered for the tab, so a reload brings it back.
  */
-import { chatAttach, chatCommands, chatFile, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
+import { filesRead, chatAttach, chatCommands, chatFile, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
 import { ICON, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { LinkPanel } from './link-panel.js'
 import { prPill, prsFor } from './hover-card.js'
+import { codeQuote } from './file-view.js'
 
 const TEMPLATE = `
 <div class="sheet panel">
@@ -65,6 +66,12 @@ const MD_PATH = /^[~./\w@-][^\s`'"<>]*\.(md|markdown)$/i
 /** A local path as Claude writes one: `src/ui/chat.js:42`, `~/notes.md`, `/abs/dir`, `api.mjs`. */
 const LOCAL_PATH = /^(?:~|\.{1,2})?\/?[\w@.+-]+(?:\/[\w@.+-]+)+\/?(?::\d+(?:-\d+)?)?$|^[\w@.+-]+\.[a-z]\w{0,7}(?::\d+(?:-\d+)?)?$/i
 
+/**
+ * A path to a file the file view can open: `src/api.mjs`, `/abs/x.go:12`, or a bare name only with
+ * a line (`api.mjs:42`), so a domain like `dev.example.com` stays plain text.
+ */
+const CODE_PATH = /^(?:~\/|\/|\.{1,2}\/)?[\w@.+-]+(?:\/[\w@.+-]+)+\.[a-z]\w{0,7}(?::\d+(?:-\d+)?)?$|^[\w@.+-]+\.[a-z]\w{0,7}:\d+(?:-\d+)?$/i
+
 /** A small copy button after a link or a path; the click is caught on the log, see the constructor. */
 function copyButton(text) {
   const b = document.createElement('button')
@@ -88,10 +95,16 @@ function markLinks(el) {
     if (code.closest('pre')) continue
     const text = code.textContent.trim()
     if (LOCAL_PATH.test(text) || /^https?:\/\//i.test(text)) code.after(copyButton(text))
-    if (!MD_PATH.test(text)) continue
-    code.dataset.md = text
-    code.classList.add('md-file')
-    code.title = 'Open beside the chat'
+    if (MD_PATH.test(text)) {
+      code.dataset.md = text
+      code.classList.add('md-file')
+      code.title = 'Open beside the chat'
+    } else if (CODE_PATH.test(text)) {
+      // Any other file, `src/api.mjs:42` say, opens in the file browser's view at that line.
+      code.dataset.code = text
+      code.classList.add('md-file')
+      code.title = 'Open beside the chat'
+    }
   }
   return el
 }
@@ -238,6 +251,12 @@ export class Chat {
       e.preventDefault()
       this.openFile(file.dataset.md)
     })
+    this.log.addEventListener('click', (e) => {
+      const file = e.target.closest?.('[data-code]')
+      if (!file || getSelection()?.toString()) return
+      e.preventDefault()
+      this.openCode(file.dataset.code)
+    })
     // A copy button beside a link or path copies it, and nothing else happens.
     this.log.addEventListener('click', (e) => {
       const b = e.target.closest?.('[data-copy]')
@@ -272,11 +291,6 @@ export class Chat {
     this.sheet = this.$('.sheet')
     this.linkPanel = new LinkPanel(this.el)
     this.wireQuote()
-    // The panel is the chat's size, whatever you have dragged the chat to.
-    new ResizeObserver(() => {
-      this.linkPanel.el.style.width = `${this.sheet.offsetWidth}px`
-      this.linkPanel.el.style.height = `${this.sheet.offsetHeight}px`
-    }).observe(this.sheet)
     this.sizes = loadSizes()
     this.sizeKey = ''
     new ResizeObserver(() => {
@@ -575,6 +589,7 @@ export class Chat {
       button.hidden = false
       button.style.left = `${Math.max(8, rect.right - host.left - button.offsetWidth)}px`
       button.style.top = `${Math.max(8, rect.top - host.top - button.offsetHeight - 6)}px`
+      button.code = codeQuote(sel)
       button.quote = text
     }
     this.el.addEventListener('mouseup', () => setTimeout(place, 0))
@@ -585,19 +600,24 @@ export class Chat {
     // Pressed before the selection goes: keep it, so the click still has something to quote.
     button.addEventListener('mousedown', (e) => e.preventDefault())
     button.addEventListener('click', () => {
-      if (button.quote) this.quote(button.quote)
+      if (button.code) this.quote(button.code, { raw: true })
+      else if (button.quote) this.quote(button.quote)
       button.hidden = true
       getSelection()?.removeAllRanges()
     })
   }
 
   /** Add `text` to the message box as a markdown quote and leave the cursor ready under it. */
-  quote(text) {
-    const quoted = text
-      .replace(/\n{3,}/g, '\n\n')
-      .split('\n')
-      .map((line) => (line.trim() ? `> ${line}` : '>'))
-      .join('\n')
+  quote(text, { raw = false } = {}) {
+    // Code goes in as it came, a fenced block under its `path:lines`: a `>` on each line would
+    // have Claude read it as prose.
+    const quoted = raw
+      ? text.trimEnd()
+      : text
+          .replace(/\n{3,}/g, '\n\n')
+          .split('\n')
+          .map((line) => (line.trim() ? `> ${line}` : '>'))
+          .join('\n')
     const before = this.input.value.replace(/\s+$/, '')
     this.input.value = `${before ? `${before}\n\n` : ''}${quoted}\n\n`
     this.input.focus()
@@ -613,6 +633,21 @@ export class Chat {
       // HTML comments are notes for whoever edits the file, not for reading it.
       const text = doc.text.replace(/<!--[\s\S]*?-->\s*/g, '')
       this.linkPanel.showDoc({ title: doc.path.split('/').pop(), sub: doc.path, markdown: text, key: `file:${doc.path}` })
+    } catch (err) {
+      this.note(err.message, true)
+    }
+  }
+
+  /**
+   * A code file this chat names, in the file view beside it, at its line. Only a file in a repo
+   * under the browser's folder opens; anything else says so.
+   */
+  async openCode(ref) {
+    const [, file, line] = /^(.*?)(?::(\d+)(?:-\d+)?)?$/.exec(ref)
+    const cwd = this.thread?.ref?.cwd || this.thread?.cwd || this.folder || ''
+    try {
+      const doc = await filesRead({ cwd, ref: file })
+      this.linkPanel.showFile(doc, Number(line) || 0, this.repoOf({ project: doc.repo }))
     } catch (err) {
       this.note(err.message, true)
     }

@@ -8,6 +8,8 @@ import { Hud } from './ui/hud.js'
 import { PLOT_PALETTE, hashString } from './world/plots.js'
 import { Chat, lastChat } from './ui/chat.js'
 import { HoverCard } from './ui/hover-card.js'
+import { Palette } from './ui/palette.js'
+import { FileView } from './ui/file-view.js'
 import { Search } from './ui/search.js'
 import { PlanPanel } from './ui/plan-panel.js'
 import { PLANETS } from './world/planet.js'
@@ -446,6 +448,21 @@ function needYouThreads() {
   const waiting = new Set(colony.astronauts.agents.filter((a) => a.status === 'waiting').map((a) => a.id))
   return threads.filter((t) => t.canChat && waiting.has(t.id)).sort((a, b) => b.lastActivityAt - a.lastActivityAt)
 }
+
+/**
+ * ⌘P, the file browser: a file opens beside the chat when one is open, so it can be quoted
+ * into it, and on its own otherwise.
+ */
+const fileView = new FileView(hud.el)
+const repoColour = (name) => chat.repoOf({ project: name })
+const palette = new Palette(hud.el, {
+  open: (file, line) => {
+    const repo = repoColour(file.repo)
+    if (chat.isOpen) chat.linkPanel.showFile(file, line, repo)
+    else fileView.show(file, line, repo)
+  },
+  repoOf: repoColour,
+})
 
 const planPanel = new PlanPanel(hud.el, {
   // The orchestrator's reply shows in the chat as it runs; it lands on the map with the next scan.
@@ -1038,13 +1055,20 @@ engine.canvas.addEventListener('pointerleave', () => {
 // ── keyboard ──────────────────────────────────────────────────────────────────────────
 
 window.addEventListener('keydown', (e) => {
+  // ⌘P (⌃P elsewhere) finds a file from anywhere, the chat's message box included, and never
+  // prints the page.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+    e.preventDefault()
+    palette.toggle()
+    return
+  }
   // Never steal keys from a field the user is actually typing in.
   const t = e.target
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return
   // Nor while chatting: with focus on one of its buttons, Enter would also open the app and A
   // would archive the very thread being talked to.
-  if (chat.isOpen || search.isOpen || planPanel.isOpen) {
-    if (e.key === 'Escape') (planPanel.isOpen ? planPanel : chat.isOpen ? chat : search).close()
+  if (chat.isOpen || search.isOpen || planPanel.isOpen || fileView.isOpen || palette.isOpen) {
+    if (e.key === 'Escape') (palette.isOpen ? palette : fileView.isOpen ? fileView : planPanel.isOpen ? planPanel : chat.isOpen ? chat : search).close()
     return
   }
 

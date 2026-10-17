@@ -12,6 +12,8 @@
 import { chatLink } from '../game/api.js'
 import { ICON } from './hud.js'
 import { renderMarkdown } from './markdown.js'
+import { rememberSize } from './resizable.js'
+import { fileActions, renderFile, scrollToLine } from './file-view.js'
 
 const el = (tag, className, text) => {
   const e = document.createElement(tag)
@@ -41,28 +43,43 @@ function checks(rollup = []) {
   return Object.entries(n).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(' · ')
 }
 
+const svg = (d) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`
+const FULL_ICON = {
+  enter: svg('M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'),
+  exit: svg('M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5'),
+}
+
 /** The desktop shell's browser view, when the page runs in it. */
 const shell = window.botCrossingApp?.browser
 
 export class LinkPanel {
-  constructor(parent) {
+  /**
+   * `onClose` runs whenever the panel closes, for a host that should close with it; `sizeKey` is
+   * where the size you drag it to is kept, one per place the panel lives.
+   */
+  constructor(parent, { onClose = () => {}, sizeKey = 'bot-crossing.link-size' } = {}) {
+    this.onClose = onClose
     this.el = el('div', 'link-panel panel')
     this.el.hidden = true
     this.el.innerHTML = `
       <div class="link-head">
-        <div class="info"><div class="title"></div><div class="sub"></div></div>
+        <div class="info"><div class="repo-tag" hidden></div><div class="title"></div><div class="sub"></div></div>
         <span class="link-nav" hidden>
           <button class="btn icon ghost" data-nav="back" title="Back">‹</button>
           <button class="btn icon ghost" data-nav="forward" title="Forward">›</button>
           <button class="btn icon ghost" data-nav="reload" title="Reload">↻</button>
         </span>
         <a class="btn ghost" data-out target="_blank" rel="noopener noreferrer" title="Open in the browser">Open ↗</a>
+        <button class="btn icon ghost" data-full title="Fullscreen">${FULL_ICON.enter}</button>
         <button class="btn icon ghost" data-close title="Close">${ICON.close}</button>
       </div>
       <div class="link-body"></div>`
     parent.append(this.el)
+    rememberSize(this.el, sizeKey)
     this.$ = (s) => this.el.querySelector(s)
     this.$('[data-close]').addEventListener('click', () => this.close())
+    this.$('[data-full]').addEventListener('click', () => this.fullscreen(!this.el.classList.contains('full')))
     // Links inside the panel open in the panel too.
     this.el.addEventListener('click', (e) => {
       const a = e.target.closest?.('.link-body a[href^="http"]')
@@ -120,12 +137,50 @@ export class LinkPanel {
     return !this.el.hidden
   }
 
+  fullscreen(on) {
+    this.el.classList.toggle('full', on)
+    const b = this.$('[data-full]')
+    b.innerHTML = on ? FULL_ICON.exit : FULL_ICON.enter
+    b.title = on ? 'Exit fullscreen' : 'Fullscreen'
+  }
+
   close() {
+    this.fullscreen(false)
     this.stopBrowsing()
     this.el.hidden = true
     this.el.parentElement?.classList.remove('with-link')
     this.$('.link-body').replaceChildren()
     this.url = null
+    this.onClose()
+  }
+
+  /**
+   * A file from the ⌘P browser. `repo` is `{ name, color }` for the coloured tag over the title,
+   * as the chat header wears it.
+   */
+  showFile(file, line = 0, repo = null) {
+    this.stopBrowsing()
+    this.url = null
+    this.docKey = `file:${file.abs}`
+    this.el.hidden = false
+    this.el.parentElement?.classList.add('with-link')
+    this.$('[data-out]').hidden = true
+    const tag = this.$('.repo-tag')
+    tag.hidden = !repo
+    if (repo) {
+      tag.textContent = repo.name
+      tag.style.setProperty('--repo', repo.color)
+    }
+    this.$('.title').textContent = file.path.split('/').pop() + (line ? `:${line}` : '')
+    this.$('.sub').textContent = [file.path, file.branch && `⎇ ${file.branch}`].filter(Boolean).join(' · ')
+    const body = this.$('.link-body')
+    body.replaceChildren(renderFile(file, { line }))
+    this.$('.link-foot')?.remove()
+    const foot = fileActions(file, line)
+    foot.classList.add('link-foot')
+    this.el.append(foot)
+    body.scrollTop = 0
+    scrollToLine(body, line)
   }
 
   /**
@@ -134,6 +189,7 @@ export class LinkPanel {
    */
   showDoc({ title, sub = '', markdown, actions = null, key = '' }) {
     this.stopBrowsing()
+    this.$('.repo-tag').hidden = true
     this.url = null
     this.docKey = key
     this.el.hidden = false
@@ -161,6 +217,7 @@ export class LinkPanel {
 
   async open(url) {
     this.docKey = ''
+    this.$('.repo-tag').hidden = true
     this.$('.link-foot')?.remove()
     this.$('[data-out]').hidden = false
     this.url = url

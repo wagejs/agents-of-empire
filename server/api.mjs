@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { previewLink, withPrStatus } from './link.mjs'
+import { grepFiles, listFiles, openInEditor, readFile, readImage } from './files.mjs'
 import { freshLoop, LOOP_SKILLS } from './loops.mjs'
 import { readMarkdown } from './mdfile.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
@@ -423,6 +424,37 @@ const TITLE_MAX = 200
  * only, even when `BOT_CROSSING_HOST` has put the rest of the colony on the network. The Host
  * and Origin checks have already run by the time a request gets here.
  */
+/**
+ * The ⌘P browser: list, read and search the files of the repos under its folder, and hand one
+ * to VS Code. Code and whatever sits in it is private, so this machine's browser only.
+ */
+async function files(url, req, res) {
+  if (!LOOPBACK.has(req.socket.remoteAddress)) return send(res, 403, { error: 'The file browser only answers a browser on this machine' })
+  // An <img> asks with GET, so an image is the one thing read that way.
+  if (url.pathname === '/api/files/image' && req.method === 'GET') {
+    // Not for another site's <img>: browsers say where a request comes from.
+    const site = req.headers['sec-fetch-site']
+    if (site && site !== 'same-origin' && site !== 'none') return send(res, 403, { error: 'Not from another site' })
+    const img = await readImage({ repo: url.searchParams.get('repo'), path: url.searchParams.get('path') })
+    if (!img) return send(res, 404, { error: 'No such image' })
+    res.writeHead(200, { 'content-type': img.type, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'", 'x-content-type-options': 'nosniff' })
+    return res.end(img.body)
+  }
+  if (req.method !== 'POST') return send(res, 404, { error: 'Unknown endpoint' })
+  const body = await readJsonBody(req)
+  if (url.pathname === '/api/files/list') return send(res, 200, await listFiles())
+  if (url.pathname === '/api/files/read') {
+    const file = await readFile(body)
+    return send(res, file.ok ? 200 : 404, file)
+  }
+  if (url.pathname === '/api/files/grep') return send(res, 200, await grepFiles(body))
+  if (url.pathname === '/api/files/open') {
+    const done = await openInEditor(body)
+    return send(res, done.ok ? 200 : 404, done)
+  }
+  return send(res, 404, { error: 'Unknown endpoint' })
+}
+
 async function chat(pathname, req, res) {
   if (!LOOPBACK.has(req.socket.remoteAddress)) {
     return send(res, 403, { error: 'Chat only answers a browser on this machine' })
@@ -666,6 +698,7 @@ export async function apiMiddleware(req, res, next) {
     }
 
     if (url.pathname.startsWith('/api/chat/')) return await chat(url.pathname, req, res)
+    if (url.pathname.startsWith('/api/files/')) return await files(url, req, res)
 
     // Shared sessions start Claude Code sessions that edit code, so, like chat, this machine only.
     if (url.pathname.startsWith('/api/share/') && req.method === 'POST') {

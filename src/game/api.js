@@ -203,3 +203,12 @@ async function streamEvents(url, payload, onEvent, signal) {
     for (const line of lines) if (line.trim()) onEvent(JSON.parse(line))
   }
 }
+
+/** The ⌘P browser: every repo under its folder with its files, `{ root, repos: [{ name, branch, files }] }`. */
+export const filesList = () => post('/api/files/list', {})
+/** One file, by `{ repo, path }` or `{ abs }`: `{ kind: 'text'|'image'|'large'|'binary', text, … }`. */
+export const filesRead = (where) => post('/api/files/read', where)
+/** Lines containing `query` across the repos, or in `repo` alone. */
+export const filesGrep = (query, repo) => post('/api/files/grep', { query, repo })
+export const filesOpenInEditor = (repo, path, line) => post('/api/files/open', { repo, path, line })
+export const fileImageUrl = (repo, path) => `/api/files/image?${new URLSearchParams({ repo, path })}`

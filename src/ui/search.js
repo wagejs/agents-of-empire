@@ -10,6 +10,7 @@
  */
 import { ICON } from './hud.js'
 import { matches } from '../game/thread-search.js'
+import { rememberSize } from './resizable.js'
 
 /** Enough rows to scroll through, few enough that typing never waits on the DOM. */
 const LIMIT = 200
@@ -61,6 +62,7 @@ export class Search {
     this.el.innerHTML = TEMPLATE
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
+    rememberSize(this.$('.sheet'), 'bot-crossing.search-size')
     this.box = this.$('.search-box')
     this.results = this.$('.search-results')
 

@@ -9,6 +9,7 @@
 import { shareExercise, sharePreview, shareStart } from '../game/api.js'
 import { ICON } from './hud.js'
 import { renderMarkdown } from './markdown.js'
+import { rememberSize } from './resizable.js'
 
 const LAST_PLAN = 'bot-crossing.last-plan'
 const SIZE = 'bot-crossing.plan-size'
@@ -45,13 +46,7 @@ export class PlanPanel {
     this.el.innerHTML = TEMPLATE
     parent.appendChild(this.el)
     this.$ = (s) => this.el.querySelector(s)
-    // The size you dragged it to, kept for next time.
-    const sheet = this.$('.sheet')
-    Object.assign(sheet.style, JSON.parse(localStorage.getItem(SIZE) || '{}'))
-    new ResizeObserver(() => {
-      const { width, height } = sheet.style
-      if (width && height) localStorage.setItem(SIZE, JSON.stringify({ width, height }))
-    }).observe(sheet)
+    rememberSize(this.$('.sheet'), SIZE)
     this.input = this.$('.search-box')
     this.input.value = localStorage.getItem(LAST_PLAN) || ''
     // Only a click that starts on the backdrop closes it: a resize or text selection dragged past

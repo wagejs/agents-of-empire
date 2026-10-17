@@ -5,6 +5,7 @@ import { STATUS_LABEL } from '../game/colony.js'
 import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
 import { prPill, prsFor } from './hover-card.js'
+import { rememberSize } from './resizable.js'
 
 /**
  * The whole HUD, in plain DOM.
@@ -516,6 +517,7 @@ export class Hud {
       if (e.target === this.$('.help')) this.toggleHelp(false)
     })
     this.$('.help .sheet').addEventListener('click', (e) => e.stopPropagation())
+    rememberSize(this.$('.help .sheet'), 'bot-crossing.help-size')
     on('#btn-help-close', 'click', () => this.toggleHelp(false))
 
     this.settings.onChange(() => this.syncSettings())
@@ -1386,6 +1388,7 @@ const TEMPLATE = `
         <div class="k"><span>Reset view</span><kbd>0</kbd></div>
         <div class="k"><span>Hide all UI</span><kbd>H</kbd> <kbd>${IS_MAC ? '⌘' : 'Ctrl'}\\</kbd></div>
         <div class="k"><span>Settings</span><kbd>S</kbd></div>
+        <div class="k"><span>Find a file in any repo</span><kbd>${IS_MAC ? '⌘' : 'Ctrl'}P</kbd></div>
         <div class="k"><span>Screenshot</span><kbd>P</kbd></div>
       </div>
       <div>
