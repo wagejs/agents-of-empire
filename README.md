@@ -39,6 +39,7 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 - **Subagents** are smaller bots, teal on the space planets and Minions on Medieval.
 - **Planets** — press `Tab` to change planet. **Medieval** is a KayKit hex island with a road,
   a river and a castle, and its crew are skeletons whose cloth wears the repo's colour.
+
   ![The Medieval planet](docs/colony-medieval.png)
 
 - **Day and night** — press `L` for the time of day. At night the windows light up in each
