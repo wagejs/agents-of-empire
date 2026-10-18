@@ -168,7 +168,19 @@ app.on('second-instance', show)
 app.on('activate', show)
 app.on('before-quit', () => (quitting = true))
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // `npm run app:dev`: the page comes from Vite on the same port, so an edit shows without a restart.
+  if (process.argv.includes('--dev')) {
+    const { createServer } = await import('vite')
+    try {
+      const vite = await createServer({ root: path.join(here, '..'), server: { host: '127.0.0.1', port: PORT, strictPort: true } })
+      await vite.listen()
+    } catch (err) {
+      dialog.showErrorBox('Agents of Empire', `${err.message}\nQuit the other copy of the app, or start with PORT=<another port>.`)
+      return app.exit(1)
+    }
+    return createWindow()
+  }
   const server = http.createServer(handle)
   server.on('error', (err) => {
     dialog.showErrorBox('Agents of Empire', err.code === 'EADDRINUSE' ? `Port ${PORT} is in use. Quit what holds it, or start with PORT=<another port>.` : String(err.message))
