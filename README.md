@@ -48,6 +48,8 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 > 🌱 from [Bot Crossing](https://github.com/jarrenrocks/bot-crossing), the project this forks ·
 > ✨ added in Agents of Empire
 
+The full list, down to the small touches, is in [docs/FEATURES.md](docs/FEATURES.md).
+
 ### The colony
 
 - 🌱 **Every thread is a bot** — Claude Code, Codex CLI, OpenCode, Cursor, Antigravity, Kilo Code
