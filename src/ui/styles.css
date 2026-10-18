@@ -3343,3 +3343,24 @@ kbd {
 .side .name.renamable { cursor: text; }
 .side .name.renamable:hover { text-decoration: underline dotted; }
 .side .name input.rename { width: 100%; font: inherit; }
+
+/* ── plan usage (what /usage shows) ───────────────────────────────────────── */
+
+.limits {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 15px 10px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.limits[hidden] { display: none; }
+.limits .limit { display: flex; align-items: center; gap: 8px; }
+.limits .k { width: 52px; flex: none; }
+.limits .bar { flex: 1; height: 5px; border-radius: 3px; background: var(--line, rgba(255, 255, 255, 0.12)); overflow: hidden; }
+.limits .bar i { display: block; height: 100%; border-radius: 3px; background: #6fbf73; }
+.limits .mid .bar i { background: #d8a23a; }
+.limits .high .bar i { background: #d9534f; }
+.limits .pct { width: 32px; text-align: right; color: inherit; font-variant-numeric: tabular-nums; }
+.limits .reset { flex: none; width: 118px; opacity: 0.75; white-space: nowrap; }
+.limits .limit-age { opacity: 0.6; font-style: italic; }

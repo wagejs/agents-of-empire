@@ -1,4 +1,5 @@
 import fsp from 'node:fs/promises'
+import { readLimits } from './limits.mjs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -693,7 +694,8 @@ export async function apiMiddleware(req, res, next) {
       // A harness that is present but cannot read its own store says so here, rather than
       // appearing healthy in the list while quietly contributing nothing.
       const warnings = (await harnessStatus()).filter((h) => h.detected && h.error).map((h) => h.error)
-      return send(res, 200, { threads, scannedAt: Date.now(), warnings })
+      // Your plan's usage limits, as the last Claude Code session reported them (see limits.mjs).
+      return send(res, 200, { threads, scannedAt: Date.now(), warnings, limits: await readLimits() })
     }
 
     if (url.pathname === '/api/loops' && req.method === 'GET') {

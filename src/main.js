@@ -1509,6 +1509,7 @@ async function poll() {
   try {
     const res = await fetchThreads()
     applyThreads(res.threads || [])
+    hud.setLimits(res.limits)
     hud.removeBoot()
     restoreChat()
     chat.refreshNeedYou()

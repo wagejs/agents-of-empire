@@ -609,6 +609,38 @@ export class Hud {
     }
   }
 
+  /**
+   * Your plan's usage, the way `/usage` shows it: the 5-hour session and the week, each as a bar
+   * with when it resets. Says how old the numbers are once they are, since only a running Claude
+   * Code session refreshes them.
+   */
+  setLimits(limits) {
+    const el = this.$('.limits')
+    el.hidden = !limits
+    if (!limits) return
+    const now = Date.now()
+    const until = (t) => {
+      const m = Math.max(0, Math.round((t - now) / 60000))
+      if (m < 60) return `${m}m`
+      if (m < 24 * 60) return `${Math.floor(m / 60)}h ${m % 60}m`
+      return new Date(t).toLocaleDateString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+    }
+    const row = (label, w) => {
+      if (!w) return ''
+      const pct = Math.round(w.used)
+      const level = pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low'
+      return (
+        `<div class="limit ${level}"><span class="k">${label}</span>` +
+        `<span class="bar"><i style="width:${pct}%"></i></span><span class="pct">${pct}%</span>` +
+        `<span class="reset">resets ${until(w.resetsAt)}</span></div>`
+      )
+    }
+    const age = Math.round((now - limits.at) / 60000)
+    const stale = limits.at && age >= 15 ? `<div class="limit-age">as of ${age < 60 ? `${age}m` : `${Math.floor(age / 60)}h`} ago</div>` : ''
+    const html = row('Session', limits.five_hour) + row('Week', limits.seven_day) + stale
+    if (this._last.limits !== html) el.innerHTML = this._last.limits = html
+  }
+
   /** The Sprint and Side-project villages, with their archived hexes. Drawn by `setLegend`. */
   setVillages(villages) {
     this._villages = villages || []
@@ -1516,6 +1548,7 @@ const TEMPLATE = `
   </nav>
 
   <div class="stats"></div>
+  <div class="limits" hidden title="Your Claude plan's usage limits, as the last Claude Code session reported them"></div>
 
   <div class="loops" title="Stop the session running this skill, archive it, and start the skill in a fresh one. Its state, drafts and notes carry over.">
     <span class="loops-label">Fresh loop</span>
