@@ -231,7 +231,7 @@ export class Colony {
     // at construction — a world with more relief would otherwise leave it hovering.
     const ship = shipPosition()
     this.ship.group.position.y = this.board ? DECK_TOP : terrainHeight(ship.x, ship.z, this.planet)
-    this.ship.setStyle(this.planet.board ? 'castle' : 'ship')
+    this.ship.setStyle(this.planet.board || this.planet.castle ? 'castle' : 'ship')
     for (const v of this.villageShips?.values() || []) this._seatShip(v)
 
     this._dustTint.set(this.planet.ground.high)
@@ -263,7 +263,7 @@ export class Colony {
     this.boardCells = null
     this.villageBoard = null
     if (!this.planet.board) {
-      // Off Medieval: whatever bridges and gates the last planet had go with it.
+      // Off the tiles: no gates, and the bridges the last planet had are re-laid for this one.
       this.wallGates = new Set()
       this._bridgeSignature = null
       this._syncBridges()
@@ -735,7 +735,7 @@ export class Colony {
     // A painted map is land of its own: the islands stand out past its coast.
     const painted = this.planet.board && growTown(boardMap(), this.townGrowth || 0)
     const mainland = painted ? new Set(painted.cells.map(([q, r]) => `${q},${r}`)) : null
-    const { layout, anchors, memory } = allocateWorld(sizes, this.plotCells, { mainland, landRings: this.planet.board ? LAND_RINGS : 0 })
+    const { layout, anchors, memory } = allocateWorld(sizes, this.plotCells, { mainland, landRings: this.planet.board ? LAND_RINGS : this.planet.shape === 'island' ? 1 : 0 })
     this.villageAnchors = anchors
     // Remembered, not replaced: a project that has just lost its last thread keeps its
     // ground on the books, and the oldest entries fall off the end. The island middles ride
@@ -1355,7 +1355,7 @@ export class Colony {
   _seatShip(v) {
     const p = v.ship.group.position
     v.ship.group.position.y = this.board ? DECK_TOP : terrainHeight(p.x, p.z, this.planet)
-    v.ship.setStyle(this.planet.board ? 'castle' : 'ship')
+    v.ship.setStyle(this.planet.board || this.planet.castle ? 'castle' : 'ship')
   }
 
   /**

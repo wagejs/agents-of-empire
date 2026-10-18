@@ -175,6 +175,56 @@ export const PLANETS = {
     grade: { saturation: 1.1, warmth: 0.06 },
   },
 
+  kingdom: {
+    id: 'kingdom',
+    name: 'Kingdom',
+    blurb: 'Castles and timber towns on green islands in a warm sea, with skeletons at work.',
+    buildings: 'medieval',
+    crew: 'skeletons',
+    // Medieval without the tiles: the town stands on Archipelago's own ground, shaped round the
+    // colony, with a castle for a ship. Its village islands stand apart across open water.
+    castle: true,
+    shape: 'island',
+    water: { level: -1.7, shallow: 0x4fc8d8, deep: 0x1a5aa0, foam: 0xffffff, waveHeight: 0.12, sparkle: 0.8 },
+    shore: { color: 0xe8dcae, band: 1.0 },
+    ground: { low: 0x3d6b38, high: 0x7fa356, tint: 0x94b866 },
+    rock: 0x7a776c,
+    horizon: 0x8cb8dc,
+    sky: { top: 0x2c5f9e, bottom: 0xb4d4ea },
+    fog: { color: 0x9cbccc, near: 150, far: 330 },
+    sun: { color: 0xffeccc, intensity: 2.5, night: 0.13 },
+    ambient: { sky: 0x92c2e6, ground: 0x48603a, intensity: 0.95 },
+    atmosphere: 1,
+    craters: 0,
+    roughness: 0.75,
+    scatter: 'flora',
+    grass: { sway: 0.6 },
+    companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
+    dust: 0.2,
+    weather: [
+      { kind: 'pollen', rate: 0.2 },
+      { kind: 'fireflies', rate: 0.6 },
+    ],
+    clouds: { amount: 0.5, color: 0xffffff, speed: 1 },
+    fauna: {
+      birds: { kind: 'gull', count: 8, altitude: [6, 16], colors: [0xffffff, 0xf0f0f0], size: 1.1 },
+      butterflies: { count: 10, colors: [0xffd45a, 0xffffff, 0xff9a5a] },
+      fish: { count: 7 },
+    },
+    audio: {
+      beds: [
+        { sound: 'ocean-swell', gain: 0.4, shore: true },
+        { sound: 'meadow-birds', gain: 0.45, night: 0 },
+        { sound: 'crickets', gain: 0, night: 0.6 },
+      ],
+      events: [
+        { sound: 'crow', every: [20, 50], gain: 0.35, when: 'day', where: 'ring' },
+        { sound: 'owl', every: [25, 70], gain: 0.5, when: 'night', where: 'ring' },
+      ],
+    },
+    grade: { saturation: 1.1, warmth: 0.06 },
+  },
+
   // ── the eight new ones ────────────────────────────────────────────────────────────
 
   desert: {
@@ -583,7 +633,7 @@ export const PLANETS = {
 }
 
 /** Display order for the picker: home first, then outward, then the pretty ones. */
-export const PLANET_ORDER = ['moon', 'mars', 'terra', 'medieval', 'beach', 'ocean', 'jungle', 'desert', 'tundra', 'autumn', 'sakura', 'volcanic', 'sky']
+export const PLANET_ORDER = ['moon', 'mars', 'terra', 'medieval', 'kingdom', 'beach', 'ocean', 'jungle', 'desert', 'tundra', 'autumn', 'sakura', 'volcanic', 'sky']
 
 export const GROUND_SIZE = 340
 /**
