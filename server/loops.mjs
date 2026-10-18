@@ -1,6 +1,6 @@
 /**
- * Fresh sessions for the two skills that run all day from the page: /pr-watch and
- * /review-queue. One call stops the session currently running the skill, starts a new one
+ * Fresh sessions for the skills that run all day from the page, the ones chosen in the Fresh
+ * loop row. One call stops the session currently running the skill, starts a new one
  * with the skill's own `start`, names it after the skill so the next call finds it, and tells
  * it which session it replaces.
  *
@@ -18,12 +18,12 @@ import { activeRun, queueMessage, renameThread, startChat, stopRun } from './cha
 import { newChatThread } from './harnesses/claude-code.mjs'
 
 /** What the Fresh loop row holds until someone edits it from the page. */
-export const DEFAULT_LOOPS = ['pr-watch', 'review-queue']
+export const DEFAULT_LOOPS = []
 /** A skill name as Claude Code accepts it: what a `/` command and a folder name can both be. */
 const SKILL_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i
 
 const HOME = os.homedir()
-/** Where both skills have always run: Claude Code's own folder. */
+/** Where loop skills run: Claude Code's own folder. */
 const LOOP_CWD = path.join(HOME, '.claude')
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || LOOP_CWD, 'projects')
 
