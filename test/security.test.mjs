@@ -8,7 +8,10 @@ import { withServer } from './support/with-server.mjs'
 test('only the page this server served may change anything', async () => {
   await withServer(async ({ call }) => {
     const port = new URL((await call('/api/state')).url).port
-    const body = JSON.stringify({ folder: '/tmp', text: 'hello' })
+    // A folder that is not there: a request that gets past the gate is turned away by the handler
+    // itself, before a Claude session could ever start. Pointed at a real folder, every test run
+    // left a real session behind.
+    const body = JSON.stringify({ folder: '/nonexistent/agents-of-empire-test', text: 'hello' })
     const post = (headers) =>
       fetch(`http://127.0.0.1:${port}/api/chat/new`, { method: 'POST', headers, body }).then((r) => r.status)
 
@@ -25,10 +28,10 @@ test('only the page this server served may change anything', async () => {
       http.get({ host: '127.0.0.1', port, path: '/api/threads', headers: { Host: 'evil.example' } }, (r) => resolve(r.statusCode)).on('error', reject))
     assert.equal(rebound, 403)
 
-    // The page itself still gets through: same origin, JSON.
+    // The page itself still gets through: same origin, JSON. It reaches the handler, which
+    // answers the missing folder with a 400 rather than the gate's 403 or 415.
     const own = await post({ Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' })
-    assert.notEqual(own, 403)
-    assert.notEqual(own, 415)
+    assert.equal(own, 400)
   })
 })
 
