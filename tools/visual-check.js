@@ -4,6 +4,7 @@ import { Settings, PRESETS } from '../src/core/settings.js'
 import { Colony } from '../src/game/colony.js'
 import { loadKit } from '../src/world/kit.js'
 import { loadCrew, crewRig } from '../src/agents/crew.js'
+import { loadSkeletons } from '../src/agents/skeletons.js'
 import { installWorldCurve, setCurveView, CURVE_FULL } from '../src/core/curve.js'
 import { PLANETS, mulberry } from '../src/world/planet.js'
 
@@ -26,6 +27,8 @@ try {
   const engine = new Engine(settings).mount(document.querySelector('#scene'))
   const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
   colony.astronauts.setRig(crewRig())
+  // As the page does: a skeleton planet's crew are the KayKit skeletons, not the astronauts.
+  colony.astronauts.setSkeletons(await loadSkeletons(crewRig()))
   const threads = Array.from({ length: 42 }, (_, i) => ({
     id: `visual-${i}`, project: `fixture-${Math.floor(i / 14)}`, title: `Fixture ${i}`,
     createdAt: i, lastActivityAt: Date.now(), sizeBytes: 100000, unread: i % 3 === 0, running: i % 3 === 1,

@@ -5,7 +5,7 @@ out of the ship, claims a plot for its repo and builds while it works. Chat with
 thread from the map, approve its tool calls, and run one plan across many repos at once while
 an orchestrator keeps you posted.
 
-![A colony on Terra: three repos, each in its own colour, with their bots and buildings](docs/colony-terra.png)
+![A Medieval colony at work: skeleton crews in their repo's colour, buildings rising, status badges overhead](docs/colony.gif)
 
 A fork of [**Bot Crossing**](https://github.com/jarrenrocks/bot-crossing) by Jarren Rocks
 ([@jarrenrocks](https://github.com/jarrenrocks)), which draws the colony, the bots and the
@@ -69,6 +69,9 @@ harness adapters. This fork adds chat, thread control and multi-repo orchestrati
 - 🌱 **Subagents** are smaller bots, in teal.
 - 🌱 **Twelve planets** — press `Tab` to change planet: Luna, Mars, Terra, Dune, Canopy,
   Shoreline, Archipelago, Frost, Aerie, Cinder, Harvest and Blossom.
+
+  ![Terra, one of the original planets](docs/colony-terra.png)
+
 - ✨ **The Medieval planet** — a KayKit hex island with a road, a river and a castle. The crew
   are skeletons whose cloth wears their repo's colour, subagents are Minions, and a
   long-running thread gets a church, a windmill or a great tower.
