@@ -280,6 +280,31 @@ async function awaitingReply(file) {
   return false
 }
 
+/**
+ * Whether a subagent has handed its answer back. Newer Claude Code subagents finish by calling a
+ * hand-back tool rather than ending on a plain reply, so the transcript's last word is that call
+ * and its result — which `awaitingReply` reads as a turn still in progress, and the errand stays
+ * on the map as busy for the whole window after it has finished.
+ */
+export function handedBack(records) {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i]
+    if (r.type !== 'assistant') continue
+    const content = r.message?.content
+    return Array.isArray(content) && content.some((c) => c?.type === 'tool_use' && c.name === 'SubagentHandback')
+  }
+  return false
+}
+
+async function finishedErrand(file) {
+  if (await awaitingReply(file)) return true
+  try {
+    return handedBack(jsonLines(await readTail(file, TAIL_BYTES)))
+  } catch {
+    return false
+  }
+}
+
 /** Transcript metadata is expensive to parse, so keep it until the file changes. */
 const metaCache = new Map()
 async function transcriptMeta(entry) {
@@ -391,7 +416,7 @@ async function scanSubagents(livePending) {
         // A subagent that has handed its answer back is finished however recently it wrote —
         // the same question `awaitingReply` asks of a thread, put to the errand's own transcript.
         seen.add(file)
-        if (await awaitingReply(file)) continue
+        if (await finishedErrand(file)) continue
         const out = byParent.get(parent) || []
         out.push({
           id: path.basename(file, '.jsonl'),

@@ -933,3 +933,13 @@ test('link: prStatus names where a PR stands', async () => {
   assert.equal(prStatus({ state: 'OPEN', reviewDecision: 'CHANGES_REQUESTED' }), 'changes')
   assert.equal(prStatus({ state: 'OPEN', reviewDecision: '' }), 'open')
 })
+
+test('a subagent that handed its answer back is finished, though its transcript ends on a tool call', async () => {
+  const { handedBack } = await import('../server/harnesses/claude-code.mjs')
+  const call = (name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name }] } })
+  const result = { type: 'user', message: { content: [{ type: 'tool_result' }] } }
+  assert.equal(handedBack([call('Read'), result, call('SubagentHandback'), result]), true)
+  assert.equal(handedBack([call('SubagentHandback'), result, call('Read'), result]), false, 'still working after an earlier one')
+  assert.equal(handedBack([call('Bash'), result]), false)
+  assert.equal(handedBack([]), false)
+})
