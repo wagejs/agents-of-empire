@@ -201,7 +201,7 @@ test('an implementing session runs allow-all; pushes, risky commands and your as
   }
   assert.equal((await can('Edit', { file_path: path.join(wt, 'a.go') })).behavior, 'allow')
   assert.equal((await can('Edit', { file_path: '/etc/hosts' })).behavior, 'deny', 'writes stay in the worktree')
-  for (const cmd of ['git rebase main', 'git push --force origin x', 'git push -f']) assert.equal((await run(cmd)).behavior, 'deny', cmd)
+  for (const cmd of ['git rebase main', 'git push --force origin x', 'git push -f', 'git -C . push -uf origin x', 'git push origin +main', 'git pull --rebase', 'git -c a=b rebase main']) assert.equal((await run(cmd)).behavior, 'deny', cmd)
 
   // Waits: each kind is held until answered, then recorded.
   assert.equal(classify('Bash', { command: 'kubectl apply -f x.yaml' }).kind, 'danger')
@@ -241,6 +241,13 @@ test('an implementing session runs allow-all; pushes, risky commands and your as
 
   // A research session still runs only read-only commands, and never pushes.
   assert.ok(!bashAllowed('go test ./...'))
+  for (const cmd of ['cat $(touch x)', 'echo `id`', 'echo hi > a.txt', 'cat <(id)', 'ls & id', 'ls\nid', 'find . -exec rm {} ;', 'find . -delete', 'rg --pre ./x foo', 'git grep -O foo', 'git diff --output=x'])
+    assert.ok(!bashAllowed(cmd), cmd)
+  assert.ok(bashAllowed('git log --oneline 2>&1 | head -5'))
+  // Pushes hidden behind a wrapper still wait for you.
+  for (const cmd of ['env X=1 git push', 'git -c a=b push', 'sh -c "git push"', 'ls\ngit push', 'git -C . push origin x'])
+    assert.equal(classify('Bash', { command: cmd })?.kind, 'push', cmd)
+  assert.equal(classify('Bash', { command: 'sudo kubectl delete pod x' })?.kind, 'danger')
   assert.equal((await sessionPermissions(store, 'r', writable)('Bash', { command: 'git push' })).behavior, 'deny')
 })
 

@@ -66,9 +66,9 @@ written down here.
 
 ## What is most worth contributing
 
-**Harness adapters, by a wide margin.** Agents of Empire reads Claude Code and Codex. The whole
-point of the seam in `server/harnesses/` is that adding OpenCode, Antigravity, Amp, Cursor or
-anything else should be one new file and one line in a registry.
+**Harness adapters, by a wide margin.** Agents of Empire reads the harnesses in `server/harnesses/`. The whole
+point of the seam in `server/harnesses/` is that adding Amp, Aider or anything else should be
+one new file and one line in a registry.
 
 Everything you need is in **[`server/harnesses/README.md`](server/harnesses/README.md)** — the
 interface, the thread shape, the ground rules, and how to find where a given harness keeps its
@@ -81,7 +81,7 @@ Two hard rules, and I will not bend on either — both are there because breakin
 already cost somebody's machine something:
 
 - **Nothing is ever written to a harness.** Not a transcript, not a session record, not one
-  flag. `data/colony.json` is the only file this project writes.
+  flag. The project writes only its own files, listed under "What it reads" in the README.
 - **Nothing is ever read from or executed inside another application's bundle.** Only files
   under the user's own home directory. Opening a thread goes through a URL the OS resolves, or
   a command the user already has on `PATH`.
@@ -123,7 +123,7 @@ demanded; keeping the existing ones green is.
 - **Match the surrounding code.** No semicolons, single quotes, 2-space indent, 110ish columns.
   Comments in this codebase explain *why* — particularly why an obvious approach was rejected.
   That style is deliberate; please keep it where you touch things.
-- **Do not add dependencies casually.** The runtime has two, and I would like it to stay small.
+- **Do not add dependencies casually.** The runtime has five, and I would like it to stay small.
 - **Do not widen what gets written to disk.** See the two hard rules above. That restraint is
   the feature.
 
@@ -140,5 +140,6 @@ release, and I would rather not repeat that.
 ## Security
 
 If you find something that reads files it should not, writes where it should not, or lets a web
-page you merely visited drive the local server, please open an issue rather than a public PR
-with a working exploit. See "Keeping it local" in the README for the boundaries as they stand.
+page you merely visited drive the local server, please report it privately through
+the repository's Security tab, not in an issue or a PR. [SECURITY.md](SECURITY.md) has what counts
+and the limits as they stand.

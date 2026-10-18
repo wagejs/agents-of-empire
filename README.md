@@ -232,8 +232,10 @@ npm run dev   # browser, with live reload → http://localhost:5274
 npm run app   # or the desktop app        → serves on 127.0.0.1:5275
 ```
 
-The server listens on `127.0.0.1` only, and chat answers requests from this computer only.
-Chat uses your own `claude` CLI and its login; nothing goes to another service.
+The server listens on `127.0.0.1` (the dev server on `localhost`), and only the page it served
+can change anything: other sites and other local ports are refused. Chat uses your own `claude`
+CLI and its login. The only other network calls are link previews (a page's title, never a
+private address) and `gh` for pull request status. See [SECURITY.md](SECURITY.md) for the limits.
 
 ### What it reads
 
@@ -244,6 +246,8 @@ It never writes to a harness. Its own files are:
 |------|------|
 | `data/colony.json` | Layout, archived and hidden repos, settings |
 | `data/storage.json` | Chat modes, sizes, the open chat and the last plan, shared by app and browser |
+| `data/loops.json` | The skills in the Fresh loop row |
+| `<repo>/.claude/worktrees/` | Fresh worktrees for orchestration sessions, one per repo session |
 | `~/.claude/.store/` | Orchestration notes, briefs, reports and approvals |
 
 Adding a harness is one file in [`server/harnesses/`](server/harnesses/README.md) plus one line
@@ -355,7 +359,7 @@ This is how Medieval was made; its commit, `ba30463`, is the worked example to f
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PORT` | `5274` (`npm run serve`), `5275` (app) | Port to serve on |
-| `AGENTS_OF_EMPIRE_HOST` | `127.0.0.1` | Interface to bind. Chat stays loopback-only regardless |
+| `AGENTS_OF_EMPIRE_HOST` | `127.0.0.1` | Interface to bind. Other devices can only look; every change stays on this machine |
 | `AGENTS_OF_EMPIRE_DATA` | `./data` | Where `colony.json` and `storage.json` live |
 | `AGENTS_OF_EMPIRE_STORE` | `~/.claude/.store` | Orchestration store |
 | `AGENTS_OF_EMPIRE_REPOS` | `~/projects` | Folder whose git checkouts plans run against |
@@ -383,9 +387,11 @@ All under `/api`, served by [`server/api.mjs`](server/api.mjs).
 | `GET` · `PUT /api/state` | The colony's saved state |
 | `GET` · `POST /api/storage` | The page's own storage, mirrored for the desktop app |
 | `POST /api/open` · `/api/new-session` · `/api/reveal` | Open a thread, start one in a harness, show a folder |
-| `POST /api/chat/*` | **Loopback only.** `new`, `send`, `stop`, `messages`, `attach`, `permission`, `mode`, `model`, `rename`, `commands`, `loop`, `loops`, `prs`, `link`, `file` |
+| `POST /api/chat/*` | `new`, `send`, `stop`, `messages`, `attach`, `permission`, `mode`, `model`, `rename`, `commands`, `loop`, `loops`, `prs`, `link`, `file` |
 | `POST /api/files/*` · `GET /api/files/image` | `list`, `read`, `grep`, `open` and images for the file finder |
 | `POST /api/share/*` | `preview`, `start`, `report`, `answer`, `exercise` for orchestration |
+
+Every route that changes something takes JSON from this machine only, from the page's own origin.
 
 ---
 

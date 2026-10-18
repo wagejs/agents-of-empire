@@ -27,6 +27,21 @@ function resolveInDist(pathname) {
   return file === DIST || file.startsWith(DIST + path.sep) ? file : null
 }
 
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  // three.js fetches a model's embedded textures from blob: and data: URLs.
+  "connect-src 'self' blob: data:",
+  "worker-src 'self' blob:",
+  'frame-src http: https:',
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ')
+
 /** The whole app: the API, then dist/. The Electron shell serves this too. */
 export async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost')
@@ -52,7 +67,11 @@ export async function handle(req, res) {
     const cache = file.includes(`${path.sep}assets${path.sep}`)
       ? 'public, max-age=31536000, immutable'
       : 'no-cache'
-    res.writeHead(200, { 'Content-Type': type, 'Content-Length': body.length, 'Cache-Control': cache })
+    const headers = { 'Content-Type': type, 'Content-Length': body.length, 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff' }
+    // The page renders model output and repo files, so a CSP backs up the escaping: no script
+    // that is not ours, no plugins, no form posts. Frames are any http(s) page, for link previews.
+    if (type.startsWith('text/html')) headers['Content-Security-Policy'] = CSP
+    res.writeHead(200, headers)
     res.end(body)
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found')

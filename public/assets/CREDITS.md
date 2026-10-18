@@ -13,6 +13,7 @@ them in the public domain.
 | `skeletons/*.glb` | [KayKit : Skeletons](https://kaylousberg.itch.io/kaykit-skeletons) | CC0 1.0 |
 | `forest.glb` | [KayKit : Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest) | CC0 1.0 |
 | `nature.glb` | [Nature Kit](https://kenney.nl/assets/nature-kit) by **[Kenney](https://kenney.nl)** — palms, cacti, pines, autumn and jungle trees, recoloured and vertex-baked by `tools/build-nature.mjs` | CC0 1.0 |
+| `lighting/studio_small_09_1k.hdr` | [Studio Small 09](https://polyhaven.com/a/studio_small_09) by Sergej Majboroda, [Poly Haven](https://polyhaven.com) | CC0 1.0 |
 
 CC0 requires nothing of you. Crediting Kay and Kenney costs nothing either.
 

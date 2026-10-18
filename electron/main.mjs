@@ -68,6 +68,11 @@ function linkView() {
     wc.loadURL(url)
     return { action: 'deny' }
   })
+  // That popup keeps the panel's rules: web pages only, and no windows of its own beyond more popups.
+  wc.on('did-create-window', (child) => {
+    child.webContents.on('will-navigate', (e, url) => isWeb(url) || e.preventDefault())
+    child.webContents.setWindowOpenHandler(({ url }) => (isWeb(url) ? { action: 'allow' } : { action: 'deny' }))
+  })
   // Keys typed into the site never reach the page, so Escape is passed on by hand.
   wc.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') win?.webContents.send('browser-escape')
@@ -84,7 +89,16 @@ function createWindow() {
     height: 900,
     title: 'Agents of Empire',
     backgroundColor: '#0b0f17',
-    webPreferences: { preload: path.join(here, 'preload.cjs'), backgroundThrottling: false },
+    // Electron's defaults, written out so no later change can quietly drop them: the page gets
+    // the preload's three-channel bridge and nothing else from Node.
+    webPreferences: {
+      preload: path.join(here, 'preload.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      backgroundThrottling: false,
+    },
   })
   win.on('page-title-updated', (e) => e.preventDefault())
   win.loadURL(`${ORIGIN}/`)

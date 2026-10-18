@@ -32,6 +32,13 @@ const HARMLESS_REDIRECTS = /\d*>>?\s*&\s*\d+|&>\s*\/dev\/null|\d*>>?\s*\/dev\/nu
 const SHELL_WRITES = { test: (cmd) => SHELL_WRITE_OPS.test(cmd.replace(HARMLESS_REDIRECTS, ' ')) }
 /** Bash a session may run without asking anyone: reading, and the read-only graph commands. */
 const SAFE_BASH = /^\s*(graphify\s+(query|path|explain)\b|git\s+(-C\s+\S+\s+)?(status|diff|log|show|blame|grep|ls-files|rev-parse|branch\s+--show-current)\b|ls\b|cat\b|head\b|tail\b|wc\b|grep\b|rg\b|find\b|jq\b|pwd\b|echo\b)/
+/**
+ * What turns a read-only command into one that runs or writes something: substitution, file
+ * redirects, process substitution, backgrounding, more lines, and the flags of find, rg and
+ * git that run a program or write a file.
+ */
+const UNSAFE_SHELL =
+  /\$\(|`|[<>]|&(?!&)|\n|\s-(exec|execdir|ok|okdir|delete|fprint\S*|fls)\b|\s--pre\b|\s(-O|--open-files-in-pager|--output)\b|\s--ext-diff\b/
 
 const inside = (child, parent) => {
   const rel = path.relative(parent, child)
@@ -39,6 +46,19 @@ const inside = (child, parent) => {
 }
 
 const resolveFrom = (cwd, p) => path.resolve(cwd || '/', String(p || ''))
+
+/** The real path, through symlinks, of `p` or of its nearest folder that exists. */
+function real(p) {
+  const rest = []
+  for (let d = p; ; d = path.dirname(d)) {
+    try {
+      return path.join(fs.realpathSync(d), ...rest)
+    } catch {
+      if (path.dirname(d) === d) return p
+      rest.unshift(path.basename(d))
+    }
+  }
+}
 
 /** The python graphify was installed with, as it recorded it beside the graph. */
 export function graphifyPython(graphPath) {
@@ -197,7 +217,8 @@ export function guard(store, name, writable, toolName, input = {}, cwd = '', { p
   if (WRITE_TOOLS.has(toolName)) {
     const target = resolveFrom(cwd, input.file_path || input.notebook_path)
     if (target.split(path.sep).includes('graphify-out')) return deny('graphify-out/ is read-only for sessions')
-    if (!writable.some((dir) => inside(target, dir))) return deny(`Sessions write only inside ${own} and their own worktrees`)
+    // A symlink in the worktree must not carry a write out of it.
+    if (!writable.some((dir) => inside(target, dir) && inside(real(target), real(dir)))) return deny(`Sessions write only inside ${own} and their own worktrees`)
     return ALLOW
   }
   if (READ_TOOLS.has(toolName)) {
@@ -215,9 +236,11 @@ export function guard(store, name, writable, toolName, input = {}, cwd = '', { p
     }
     if (/graphify-out/.test(cmd) && SHELL_WRITES.test(cmd)) return deny('graphify-out/ is read-only for sessions')
     if ((cmd.includes(root) || /(^|[\s'"/])\.store\b/.test(cmd)) && SHELL_WRITES.test(cmd)) return deny('Write to the store through submit_report, ask_orchestrator or the Write tool in your own folder')
-    if (/\bgit\s+rebase\b/.test(cmd) || /\bgit\s+push\b.*(\s--force\b|\s--force-with-lease\b|\s-f\b|\s\+\S)/.test(cmd)) return deny('Never rebase or force-push; merge main in and push fast-forward')
+    // Loose on purpose: `git -C . push -uf`, `git -c x=y rebase`, `git pull --rebase`, a refspec `+main`.
+    const line = cmd.replace(/\s+/g, ' ')
+    if (/\bgit\b.*\brebase\b/.test(line) || /\bgit\b.*\bpush\b.*(\s--force|\s-[a-z]*f[a-z]*\b|\s\+\S)/.test(line)) return deny('Never rebase or force-push; merge main in and push fast-forward')
     // An implementing session's push waits for you at the gate; nobody else pushes at all.
-    if (!push && /\bgit\s+push\b/.test(cmd)) return deny('Sessions do not push; report the branch instead')
+    if (!push && /\bgit\b.*\bpush\b/.test(line)) return deny('Sessions do not push; report the branch instead')
     return ALLOW
   }
   return ALLOW
@@ -253,6 +276,7 @@ export function sessionPermissions(store, name, writable, { gate } = {}) {
  * paths), a read-only command, or one from `extra`. `a && b`, `a; b` and `a | b` all count.
  */
 export function bashAllowed(cmd, extra) {
+  if (UNSAFE_SHELL.test(cmd.replace(HARMLESS_REDIRECTS, ' '))) return false
   const parts = cmd.split(/&&|\|\||;|\|/).map((p) => p.trim()).filter(Boolean)
   return parts.length > 0 && parts.every((p) => /^cd\s+\S+$/.test(p) || SAFE_BASH.test(p) || Boolean(extra?.test(p)))
 }

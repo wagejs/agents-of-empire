@@ -170,7 +170,7 @@ test('run_plan starts repo sessions in their worktrees on their models, and tell
   assert.match(seen[0].prompt, /- `a\.txt`: read the param \(a\.txt:1\)/)
   assert.match(seen[0].prompt, /- be-api: default country\?/)
   assert.match(seen[0].prompt, /## Rules from the plan, for every session\n- Never touch shared-lib/, "the plan's rules, as Opus read them")
-  for (const s of seen) assert.match(s.cwd, new RegExp(`/repos/${s.name.slice(8)}/\\.claude/worktrees/share-${s.name}$`), 'opens in its own worktree')
+  for (const s of seen) assert.match(s.cwd, new RegExp(`/repos/${s.name.slice(10)}/\\.claude/worktrees/share-${s.name}$`), 'opens in its own worktree')
   assert.deepEqual(told.map((t) => [t.sessionId, t.cwd]), [['conductor-1', CONDUCTOR_HOME], ['conductor-1', CONDUCTOR_HOME]])
   assert.match(told[0].text, /PROJ-7777-be-api ended reported/)
   assert.match((await h.read_report({ session: 'PROJ-7777-fe-web' })).content[0].text, /PROJ-7777-fe-web done/)

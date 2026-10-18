@@ -7,6 +7,8 @@
  * open it in the browser.
  */
 import { execFile } from 'node:child_process'
+import { lookup } from 'node:dns/promises'
+import net from 'node:net'
 import { findExecutable } from './lib/fsutil.mjs'
 
 const GITHUB = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(pull|issues)\/(\d+)(?:[/?#].*)?$/
@@ -64,6 +66,9 @@ export async function previewLink(url, { gh = findExecutable('gh', ['/opt/homebr
 
   // ponytail: headers only, without your cookies, so a site that frames only for logged-in
   // visitors is judged by what it tells a stranger.
+  // A link from a reply never makes the server knock on your own network: a host that resolves
+  // to a loopback, private or link-local address is framed without asking it first.
+  if (await isInternal(url)) return { ok: true, kind: 'frame' }
   try {
     const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(6000) })
     res.body?.cancel()
@@ -108,4 +113,29 @@ export async function withPrStatus(prs, { gh = findExecutable('gh', ['/opt/homeb
       return status ? { ...pr, status } : pr
     })
   )
+}
+
+/** Whether a URL's host is this machine or the local network, by every address it resolves to. */
+export async function isInternal(url) {
+  let host
+  try {
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return true
+  }
+  let addrs
+  try {
+    addrs = net.isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address)
+  } catch {
+    return true
+  }
+  return addrs.some((a) => {
+    const v4 = a.startsWith('::ffff:') ? a.slice(7) : a
+    if (net.isIPv4(v4)) {
+      const [x, y] = v4.split('.').map(Number)
+      return x === 0 || x === 10 || x === 127 || (x === 169 && y === 254) || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || (x === 100 && y >= 64 && y <= 127)
+    }
+    const low = a.toLowerCase()
+    return low === '::1' || low === '::' || low.startsWith('fe80:') || low.startsWith('fc') || low.startsWith('fd')
+  })
 }

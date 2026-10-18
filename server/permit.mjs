@@ -18,13 +18,17 @@ import { writeAtomic } from './store.mjs'
 /** Approved pushes or PRs after which a repo's sessions push and open PRs without asking. */
 export const TRUST_AFTER = 5
 
-const PUSH = /^\s*(git\s+(-C\s+\S+\s+)?push\b|gh\s+pr\s+(create|merge|ready|edit|close|reopen|comment|review)\b)/
+// Anywhere in the part, so `env X=1 git push`, `git -c a=b push` and `sh -c "git push"` wait too.
+const PUSH = /(\bgit\b.*\bpush\b|\bgh\b.*\bpr\s+(create|merge|ready|edit|close|reopen|comment|review)\b)/
 // ponytail: matched on the command text, so a script that does the same thing slips past it.
 // Writes stay inside the worktree (the guard); turn on Claude Code's sandbox if that is not enough.
 const DANGER =
   /^\s*(kubectl\s+(apply|create|delete|edit|patch|replace|scale|rollout|annotate|label|exec)|helm\s+(install|upgrade|uninstall|rollback|delete)|terraform\s+(apply|destroy|import|state)|terragrunt\s+(apply|destroy|run-all|import)|gcloud\b|gsutil\s+(cp|mv|rm|rsync)|aws\b|mysql\b|psql\b|mongo(sh)?\b|redis-cli\b|(npm|pnpm|yarn)\s+publish|docker\s+push|curl\s+.*(-X\s*['"]?(POST|PUT|PATCH|DELETE)|--data\b|-d\s|--form\b|-F\s)|wget\s+.*--post|.*\bmigrate\b|gh\s+api\s+.*(-X|--method|-f\s|-F\s|--field|--raw-field|--input)|gh\s+(release|repo|secret|variable|workflow)\s+(create|delete|edit|set|run|rename))/i
 
-const parts = (cmd) => String(cmd).split(/&&|\|\||;|\|/).map((p) => p.trim()).filter(Boolean)
+/** Wrappers that run the command after them: `env X=1`, `sudo`, `sh -c "…"`, `xargs`. */
+const WRAPPERS = /^(?:(?:env|sudo|command|exec|nohup|time|xargs|nice)\s+(?:-\S+\s+)*|\w+=\S*\s+|(?:ba|z)?sh\s+-c\s+['"]?|\(\s*)+/
+const parts = (cmd) =>
+  String(cmd).split(/&&|\|\||;|\||\n|&/).map((p) => p.trim().replace(WRAPPERS, '')).filter(Boolean)
 
 /** Claude Code's rule syntax, for the rules that matter here: bare tools, MCP servers, Bash(...). */
 export function ruleMatches(rule, toolName, input = {}) {

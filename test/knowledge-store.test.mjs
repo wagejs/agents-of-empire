@@ -259,6 +259,11 @@ test('6. a session cannot run graphify update or write to graphify-out', async (
   assert.equal(bash('rm -rf graphify-out'), false)
   assert.equal(guard(store, 'g', writable, 'Write', { file_path: path.join(wt, 'graphify-out', 'graph.json') }).allow, false)
   assert.equal(guard(store, 'g', writable, 'Edit', { file_path: path.join(repo, 'graphify-out', 'graph.json') }).allow, false)
+  // A symlink inside the session's folder that points out of it carries no write.
+  await fsp.mkdir(own, { recursive: true })
+  await fsp.symlink(os.tmpdir(), path.join(own, 'out'))
+  assert.equal(guard(store, 'g', writable, 'Write', { file_path: path.join(own, 'out', 'x.txt') }).allow, false)
+  assert.equal(guard(store, 'g', writable, 'Write', { file_path: path.join(own, 'report.md') }).allow, true)
 
   // Through the hook, as a session's call would go: denied and logged.
   const hooks = sessionHooks(store, 'g', writable)

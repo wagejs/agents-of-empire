@@ -20,7 +20,7 @@ import { openStore } from './store.mjs'
 
 const STEP_SECTIONS = [/^##\s+implementation steps\b/i, /^##\s+implementation\b/i, /^##\s+design\b/i]
 
-/** The ticket key a plan file is named after: `PROJ-2880-…md` → `PROJ-2880`. */
+/** The ticket key a plan file is named after: `PROJ-123-…md` → `PROJ-123`. */
 export const planKey = (file) => {
   const base = path.basename(file, '.md')
   return (/^([A-Z][A-Z0-9]*-\d+)/.exec(base) || /^([A-Za-z]+-[^-]+)/.exec(base) || [base])[1].slice(0, 40)
@@ -158,7 +158,7 @@ export function planFromReading(store, key, planText, isRepo) {
   return { repos, unassigned, human: reading.human || [], notes: reading.notes || [] }
 }
 
-/** The rules from "Implementing a ticket" every plan session works under. */
+/** The rules every plan session works under. */
 export const IMPLEMENT_LIMITS = [
   'The plan is the scope. Do only your steps; anything else goes in open_questions.',
   'Commit on your branch in your worktree, in small commits. Never rebase, never force-push. Pushing and opening a PR wait for the user to allow them, so do them last, once tests pass.',

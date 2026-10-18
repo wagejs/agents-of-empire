@@ -55,9 +55,9 @@ export function readLoops(file) {
 export function writeLoops(file, skills, dir = SKILLS_DIR()) {
   const installed = new Set(installedSkills(dir))
   const kept = [...new Set((Array.isArray(skills) ? skills : []).map(String))].filter((s) => installed.has(s))
-  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify({ skills: kept }, null, 2))
+  fs.writeFileSync(tmp, JSON.stringify({ skills: kept }, null, 2), { mode: 0o600 })
   fs.renameSync(tmp, file)
   return kept
 }

@@ -26,7 +26,8 @@ import { findExecutable } from './fsutil.mjs'
  * window that flashes and is gone before you read the error.
  */
 const TERMINALS = {
-  'wt.exe': (cwd, argv) => ['-d', cwd, ...argv],
+  // wt reads `;` as "new tab", even inside -d's folder, so a folder named `a;b` must be escaped.
+  'wt.exe': (cwd, argv) => ['-d', cwd.replaceAll(';', '\\;'), ...argv],
   'cmd.exe': (_cwd, argv) => ['/c', 'start', '', 'cmd.exe', '/k', ...argv],
 }
 

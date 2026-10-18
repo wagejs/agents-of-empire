@@ -12,7 +12,13 @@ test('a markdown path is read as Claude wrote it: absolute, ~/, or from the thre
   const fromCwd = await readMarkdown('docs/plan.md', dir)
   assert.equal(fromCwd.ok, true)
   assert.match(fromCwd.text, /step one/)
-  assert.equal((await readMarkdown(path.join(dir, 'docs', 'plan.md'))).ok, true)
+  assert.equal((await readMarkdown(path.join(dir, 'docs', 'plan.md'), dir)).ok, true)
+  // Outside the thread's folder, ~/.claude and the repos, a markdown file stays shut.
+  const elsewhere = await fsp.mkdtemp(path.join(os.tmpdir(), 'mdfile-elsewhere-'))
+  await fsp.writeFile(path.join(elsewhere, 'private.md'), '# not yours')
+  assert.equal((await readMarkdown(path.join(elsewhere, 'private.md'), dir)).ok, false)
+  assert.equal((await readMarkdown(path.join(elsewhere, 'private.md'))).ok, false)
+  await fsp.rm(elsewhere, { recursive: true, force: true })
   assert.equal(resolveMarkdown('~/notes.md'), path.join(os.homedir(), 'notes.md'))
   // Relative with no folder to resolve against: nothing to read.
   assert.equal(resolveMarkdown('docs/plan.md', ''), null)

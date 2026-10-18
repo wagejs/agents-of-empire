@@ -38,3 +38,7 @@ design/character
 
 # graphify knowledge graph, rebuilt locally
 graphify-out/
+
+# Local secrets, never committed
+.env
+.env.*

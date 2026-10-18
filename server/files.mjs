@@ -29,7 +29,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp|svg|ico|avif)$/i
 
 const git = (cwd, args, { maxBuffer = 64 * 1024 * 1024 } = {}) =>
   new Promise((resolve, reject) =>
-    execFile('git', args, { cwd, maxBuffer, timeout: 30_000 }, (err, stdout) => (err && err.code !== 1 ? reject(err) : resolve(err ? '' : stdout)))
+    execFile('git', ['-c', 'core.fsmonitor=false', ...args], { cwd, maxBuffer, timeout: 30_000 }, (err, stdout) => (err && err.code !== 1 ? reject(err) : resolve(err ? '' : stdout)))
   )
 
 const isDir = (p) => fsp.stat(p).then((s) => s.isDirectory(), () => false)

@@ -55,9 +55,10 @@ export function assertSessionName(name) {
 
 /** Write to a temp file beside the target, then rename: a reader sees the old file or the new one. */
 export async function writeAtomic(file, text) {
-  await fsp.mkdir(path.dirname(file), { recursive: true })
+  await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  await fsp.writeFile(tmp, text)
+  // Reports and the log hold your code and plans: readable by you alone.
+  await fsp.writeFile(tmp, text, { mode: 0o600 })
   await fsp.rename(tmp, file)
 }
 
@@ -168,11 +169,11 @@ export function openStore(root = defaultStoreRoot(), { reposDir = defaultReposDi
     sessionDir,
 
     async init() {
-      await fsp.mkdir(p.notes, { recursive: true })
-      await fsp.mkdir(p.sessions, { recursive: true })
+      await fsp.mkdir(p.notes, { recursive: true, mode: 0o700 })
+      await fsp.mkdir(p.sessions, { recursive: true, mode: 0o700 })
       if (!fs.existsSync(p.index)) await writeAtomic(p.index, '# Shared knowledge index\n')
       if (!fs.existsSync(p.graphs)) await writeAtomic(p.graphs, JSON.stringify({ repos: {} }, null, 2) + '\n')
-      if (!fs.existsSync(p.log)) await fsp.writeFile(p.log, '', { flag: 'a' })
+      if (!fs.existsSync(p.log)) await fsp.writeFile(p.log, '', { flag: 'a', mode: 0o600 })
       return store
     },
 
@@ -259,7 +260,7 @@ export function openStore(root = defaultStoreRoot(), { reposDir = defaultReposDi
     async createSession(name, brief) {
       const dir = sessionDir(name)
       if (fs.existsSync(path.join(dir, 'state.json'))) throw new Error(`Session ${name} already exists`)
-      await fsp.mkdir(dir, { recursive: true })
+      await fsp.mkdir(dir, { recursive: true, mode: 0o700 })
       await writeAtomic(path.join(dir, 'brief.md'), brief)
       await store.writeState(name, { name, session_id: '', status: 'created', last_report_time: null })
       return dir

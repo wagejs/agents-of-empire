@@ -17,7 +17,7 @@ const SIZE = 'agents-of-empire.plan-size'
 const TEMPLATE = `
 <div class="sheet panel">
   <div class="chat-head">
-    <input class="search-box" type="text" spellcheck="false" placeholder="Plan file, e.g. ~/projects/plans/plans/PROJ-2880-….md" aria-label="Plan file path" />
+    <input class="search-box" type="text" spellcheck="false" placeholder="Plan file, e.g. ~/plans/PROJ-123-add-coupons.md" aria-label="Plan file path" />
     <button class="btn" data-preview type="button">Preview</button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>

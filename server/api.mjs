@@ -147,10 +147,10 @@ async function writeState(next) {
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }
-  await fsp.mkdir(DATA_DIR, { recursive: true })
+  await fsp.mkdir(DATA_DIR, { recursive: true, mode: 0o700 })
   const tmp = `${STATE_FILE}.${process.pid}.${++tmpSeq}.tmp`
   try {
-    await fsp.writeFile(tmp, JSON.stringify(state, null, 2))
+    await fsp.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })
     await fsp.rename(tmp, STATE_FILE)
   } catch (err) {
     await fsp.rm(tmp, { force: true }).catch(() => {})
@@ -389,10 +389,30 @@ function hostnameOf(value) {
 function isLocalRequest(req) {
   if (!LOCAL_HOSTS.has(hostnameOf(req.headers.host))) return false
 
+  // A page on another local port (any dev server you run, or a page opened beside the chat)
+  // is another site. The browser says so in Sec-Fetch-Site, and its Origin carries the port.
+  const site = req.headers['sec-fetch-site']
+  if (site && site !== 'same-origin' && site !== 'none') return false
   const origin = req.headers.origin
-  if (origin && origin !== 'null') return LOCAL_HOSTS.has(hostnameOf(origin))
+  if (origin && origin !== 'null') return sameHost(origin, req.headers.host)
   return req.method === 'GET' || req.method === 'HEAD'
 }
+
+/** Whether an `Origin:` is this very server: host and port, not just a local hostname. */
+function sameHost(origin, host) {
+  try {
+    return new URL(origin).host === new URL(`http://${host}`).host
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A body the page sends is JSON. Requiring the type means a cross-site form or a `no-cors`
+ * fetch, which can only send `text/plain` and friends, never reaches a handler: a JSON body
+ * from another origin needs a preflight, and nothing here answers one.
+ */
+const isJsonBody = (req) => /^application\/json\b/i.test(req.headers['content-type'] || '')
 
 function readJsonBody(req, limit = 4 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
@@ -621,6 +641,12 @@ export async function apiMiddleware(req, res, next) {
   if (!isLocalRequest(req)) {
     return send(res, 403, { error: 'Agents of Empire only answers its own page on this machine' })
   }
+  const changes = req.method !== 'GET' && req.method !== 'HEAD'
+  if (changes && !isJsonBody(req)) return send(res, 415, { error: 'Send JSON' })
+  // With AGENTS_OF_EMPIRE_HOST on the network, other devices may look but never act.
+  if (changes && !LOOPBACK.has(req.socket.remoteAddress)) {
+    return send(res, 403, { error: 'Only this machine can change things here' })
+  }
 
   try {
     if (url.pathname === '/api/threads' && req.method === 'GET') {
@@ -647,15 +673,17 @@ export async function apiMiddleware(req, res, next) {
     }
 
     if (url.pathname === '/api/storage' && req.method === 'GET') {
+      // The page's own settings, chat modes included: this machine only, even with HOST set.
+      if (!LOOPBACK.has(req.socket.remoteAddress)) return send(res, 403, { error: 'This machine only' })
       const raw = await fsp.readFile(STORAGE_FILE, 'utf8').catch(() => '{}')
       return send(res, 200, cleanStorage(JSON.parse(raw || '{}')))
     }
 
     if (url.pathname === '/api/storage' && req.method === 'POST') {
       const clean = cleanStorage(await readJsonBody(req))
-      await fsp.mkdir(DATA_DIR, { recursive: true })
+      await fsp.mkdir(DATA_DIR, { recursive: true, mode: 0o700 })
       const tmp = `${STORAGE_FILE}.${process.pid}.${++tmpSeq}.tmp`
-      await fsp.writeFile(tmp, JSON.stringify(clean, null, 2))
+      await fsp.writeFile(tmp, JSON.stringify(clean, null, 2), { mode: 0o600 })
       await fsp.rename(tmp, STORAGE_FILE)
       return send(res, 200, { ok: true })
     }
@@ -703,7 +731,10 @@ export async function apiMiddleware(req, res, next) {
       if (!dir) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
 
       if (url.pathname === '/api/reveal') {
-        launch(dir)
+        // On macOS an .app bundle is a folder too, and `open` would run it: -R only shows it in
+        // Finder. Elsewhere a folder cannot run anything, so the opener just opens it.
+        if (process.platform === 'darwin') spawn('open', ['-R', dir], { stdio: 'ignore', detached: true }).on('error', () => {}).unref()
+        else launch(dir)
         return send(res, 200, { ok: true })
       }
       const harness = body.harness || (await defaultHarness())
