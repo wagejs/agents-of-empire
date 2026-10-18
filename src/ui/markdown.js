@@ -31,6 +31,7 @@ const INLINE = new RegExp(
     /(?<!\w)_([^\s_](?:[^_\n]*[^\s_])?)_(?!\w)/, // 6 italic
     /\[([^\]\n]+)\]\(([^)\s]+)\)/, // 7 label, 8 url
     /(https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/, // 9 bare url
+    /(?<![\w/.~])((?:~|\/[\w@.+-]+)(?:\/[\w@.+-]+)*\/[\w@+-][\w@.+-]*\.[a-z]\w{0,7}(?::\d+(?:-\d+)?)?)(?![\w/])/, // 10 bare absolute or ~/ file path
   ]
     .map((r) => r.source)
     .join('|'),
@@ -163,8 +164,10 @@ function inline(text) {
   return out
 }
 
-function span([all, code, bold, bold2, strike, em, em2, label, url, bare]) {
+function span([all, code, bold, bold2, strike, em, em2, label, url, bare, file]) {
   if (code !== undefined) return node('code', [code])
+  // A path Claude wrote bare in prose (`The plan is at /abs/plan.md`) reads as code, so it opens and copies.
+  if (file) return node('code', [file])
   if (bold ?? bold2) return node('strong', inline(bold ?? bold2))
   if (strike) return node('del', inline(strike))
   if (em ?? em2) return node('em', inline(em ?? em2))

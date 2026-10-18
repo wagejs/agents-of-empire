@@ -68,3 +68,18 @@ test('a link to a repo file shows its path as code; other schemes stay text', ()
   assert.deepEqual(code, n('code', ['server/api.mjs:25']))
   assert.equal(rest.join(''), ' [x](javascript:alert(1)) [y](file:///etc/passwd)')
 })
+
+test('a bare absolute or ~/ file path in prose is code; fractions and and/or are not', () => {
+  const [p] = parseMarkdown('The plan is at /Users/me/repo/docs/plan.md, and ~/notes/a.md. Also /tmp/x.js:12 here.')
+  assert.deepEqual(p.children, [
+    'The plan is at ',
+    n('code', ['/Users/me/repo/docs/plan.md']),
+    ', and ',
+    n('code', ['~/notes/a.md']),
+    '. Also ',
+    n('code', ['/tmp/x.js:12']),
+    ' here.',
+  ])
+  const [q] = parseMarkdown('read and/or write 1/2.5 of https://x.io/a/b.md now')
+  assert.deepEqual(q.children, ['read and/or write 1/2.5 of ', n('a', ['https://x.io/a/b.md'], { href: 'https://x.io/a/b.md' }), ' now'])
+})

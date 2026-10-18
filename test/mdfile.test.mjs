@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { readMarkdown, resolveMarkdown } from '../server/mdfile.mjs'
+import { claudeTmpDir, readMarkdown, resolveMarkdown } from '../server/mdfile.mjs'
 
 test('a markdown path is read as Claude wrote it: absolute, ~/, or from the thread folder', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'mdfile-'))
@@ -32,4 +32,15 @@ test('a markdown path is read as Claude wrote it: absolute, ~/, or from the thre
   assert.equal((await readMarkdown('folder.md', dir)).ok, false)
   assert.equal((await readMarkdown('missing.md', dir)).ok, false)
   await fsp.rm(dir, { recursive: true, force: true })
+})
+
+test("a plan in Claude's session scratchpad opens, from any thread", { skip: process.platform === 'win32' }, async () => {
+  const pad = path.join(claudeTmpDir(), 'mdfile-test', 'scratchpad')
+  await fsp.mkdir(pad, { recursive: true })
+  await fsp.writeFile(path.join(pad, 'plan.md'), '# Plan')
+  try {
+    assert.equal((await readMarkdown(path.join(pad, 'plan.md'), '/nowhere')).ok, true)
+  } finally {
+    await fsp.rm(path.join(claudeTmpDir(), 'mdfile-test'), { recursive: true, force: true })
+  }
 })

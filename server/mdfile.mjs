@@ -13,9 +13,12 @@ import { defaultReposDir } from './store.mjs'
 
 const MAX_BYTES = 2 * 1024 * 1024
 
-/** Folders a markdown file may live in: the thread's own, Claude Code's (plans live there), and the repos. */
+/** Claude Code's own temp folder, `/tmp/claude-<uid>`: session scratchpads (plans, notes) live there. */
+export const claudeTmpDir = () => path.join('/tmp', `claude-${process.getuid?.() ?? ''}`)
+
+/** Folders a markdown file may live in: the thread's own, Claude Code's (plans and scratchpads live there), and the repos. */
 async function allowedRoots(cwd) {
-  const roots = [path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')), FILES_ROOT, defaultReposDir()]
+  const roots = [path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')), claudeTmpDir(), FILES_ROOT, defaultReposDir()]
   if (cwd && path.isAbsolute(cwd)) roots.push(cwd)
   const real = await Promise.all(roots.map((r) => fsp.realpath(r).catch(() => null)))
   return real.filter(Boolean)
@@ -44,7 +47,7 @@ export async function readMarkdown(file, cwd) {
   // A link named `.md` pointing at something else is not a markdown file.
   if (!MARKDOWN.test(real)) return { ok: false, error: 'Only a markdown file opens here' }
   if (!(await allowedRoots(cwd)).some((root) => inside(real, root))) {
-    return { ok: false, error: "Only markdown in this thread's folder, ~/.claude or your repos opens here" }
+    return { ok: false, error: "Only markdown in this thread's folder, ~/.claude, Claude's scratchpad or your repos opens here" }
   }
   const stat = await fsp.stat(real)
   if (!stat.isFile()) return { ok: false, error: 'That is not a file' }
