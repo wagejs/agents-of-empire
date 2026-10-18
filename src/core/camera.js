@@ -47,6 +47,8 @@ const damp = (current, target, lambda, dt) => THREE.MathUtils.damp(current, targ
  */
 export class CameraRig {
   constructor(camera, domElement, settings) {
+    this.worldLimit = WORLD_LIMIT
+    this.maxDist = MAX_DIST
     this.camera = camera
     this.dom = domElement
     this.settings = settings
@@ -165,7 +167,7 @@ export class CameraRig {
       const d = this._pinchDistance()
       const [cx, cy] = this._pinchCentre()
       if (this._pinch > 0 && d > 0) {
-        this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (this._pinch / d), MIN_DIST, MAX_DIST)
+        this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (this._pinch / d), MIN_DIST, this.maxDist)
         this.distance = this.desiredDistance
         this._sync()
       }
@@ -239,7 +241,7 @@ export class CameraRig {
     const raw = (e.deltaY * unit) / 100
     const step = Math.sign(raw) * Math.min(Math.abs(raw), 2.5) * (e.ctrlKey ? 1.6 : 1)
 
-    this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + step * 0.16), MIN_DIST, MAX_DIST)
+    this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + step * 0.16), MIN_DIST, this.maxDist)
     // Hold the point under the pointer still for as long as the dolly takes to settle.
     if (this.groundPoint(e.clientX, e.clientY, this._hit2)) {
       this._zoom = { world: this._hit2.clone(), sx: e.clientX, sy: e.clientY }
@@ -257,12 +259,21 @@ export class CameraRig {
     return [(a.x + b.x) / 2, (a.y + b.y) / 2]
   }
 
+  /**
+   * How far the world reaches, so the camera can pan out to the village islands and pull back
+   * far enough to see them with Misc. Never tighter than the colony's own defaults.
+   */
+  setWorldReach(radius) {
+    this.worldLimit = Math.max(WORLD_LIMIT, radius)
+    this.maxDist = Math.max(MAX_DIST, radius * 1.6)
+  }
+
   _clampTarget() {
     const t = this.desiredTarget
     const len = Math.hypot(t.x, t.z)
-    if (len > WORLD_LIMIT) {
-      t.x = (t.x / len) * WORLD_LIMIT
-      t.z = (t.z / len) * WORLD_LIMIT
+    if (len > this.worldLimit) {
+      t.x = (t.x / len) * this.worldLimit
+      t.z = (t.z / len) * this.worldLimit
     }
   }
 
@@ -276,7 +287,7 @@ export class CameraRig {
     this.desiredTarget.copy(point)
     this.desiredTarget.y = 0
     this._clampTarget()
-    if (distance) this.desiredDistance = THREE.MathUtils.clamp(distance, MIN_DIST, MAX_DIST)
+    if (distance) this.desiredDistance = THREE.MathUtils.clamp(distance, MIN_DIST, this.maxDist)
     this._zoom = null
     this.idleFor = 99 // settle to isometric right away rather than after a pause
   }

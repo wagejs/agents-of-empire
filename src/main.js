@@ -13,10 +13,9 @@ import { Palette } from './ui/palette.js'
 import { FileView } from './ui/file-view.js'
 import { Search } from './ui/search.js'
 import { PlanPanel } from './ui/plan-panel.js'
-import { PLANETS } from './world/planet.js'
+import { PLANETS, PLANET_ORDER } from './world/planet.js'
 import { mirrorStorage } from './core/storage-mirror.js'
 import { DECK_TOP, PLOT_CELL, hexToWorld, worldToHex } from './world/plots.js'
-import { planMove } from './world/plot-move.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
 import { loadSkeletons } from './agents/skeletons.js'
@@ -40,6 +39,7 @@ import {
   saveLoops,
 } from './game/api.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
+import { VILLAGES, VILLAGE_LABEL, hexIdOfPlot, hexPlotId } from './game/villages.js'
 import { withErrands } from './game/errands.js'
 
 /**
@@ -79,7 +79,7 @@ engine.setPlanetGrade(PLANETS[settings.get('planet')]?.grade)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, titles: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, titles: {}, hexes: {}, placements: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -125,8 +125,9 @@ const actions = {
     return on
   },
 
+  // Same order as the planet picker in Settings, so Tab walks the list you can see.
   cyclePlanet: () => {
-    const ids = Object.keys(PLANETS)
+    const ids = PLANET_ORDER
     const next = ids[(ids.indexOf(settings.get('planet')) + 1) % ids.length]
     settings.set('planet', next)
     hud.hint(`${PLANETS[next].name} — ${PLANETS[next].blurb}`)
@@ -202,8 +203,21 @@ const actions = {
    */
   newConversation: async () => {
     // No repo picked: a chat in the home folder, which can still be moved to any repo first.
-    if (!selectedProject) return chat.openNew({ folder: '~', name: 'Home', repos: knownRepos() })
+    if (!selectedProject) return chat.openNew({ folder: '~', name: 'Home', repos: knownRepos(), places: placeOptions() })
     const name = selectedProject
+    const hexId = hexIdOfPlot(name)
+    // A hex is not a folder: start in the repo its threads mostly work in, or home, and land the
+    // new thread in this hex.
+    if (hexId) {
+      const dir = pathForProject(name)
+      return chat.openNew({
+        folder: dir || '~',
+        name: dir ? dir.split('/').filter(Boolean).pop() : 'Home',
+        repos: knownRepos(),
+        places: placeOptions(),
+        place: hexId,
+      })
+    }
     const folder = name && pathForProject(name)
     if (!folder) {
       hud.toast('No folder on disk for that project', 'err')
@@ -211,7 +225,7 @@ const actions = {
     }
     const harness = harnessForProject(name)
     // A Claude Code repo, or one with no threads yet, starts its next thread right here.
-    if (!harness || harness === 'claude-code') return chat.openNew({ folder, name, repos: knownRepos() })
+    if (!harness || harness === 'claude-code') return chat.openNew({ folder, name, repos: knownRepos(), places: placeOptions() })
     try {
       const shown = await newSession(folder, harness, settings.get('openIn'))
       const label = harnessLabel(harness)
@@ -273,7 +287,7 @@ const actions = {
 
   hideProject: () => {
     const name = selectedProject
-    if (!name) return
+    if (!name || hexIdOfPlot(name)) return
     state.hiddenProjects = hideProject(state.hiddenProjects || [], name)
     queueSave()
     // If the open thread belonged to the repo that just left, nothing is selected any more.
@@ -293,6 +307,99 @@ const actions = {
     applyThreads(threads)
     hud.toast(`Showing ${name} again`)
   },
+
+  // ── villages ──────────────────────────────────────────────────────────────────────
+
+  /** Fly to a village: the middle of its plots, or out along its direction while it is empty. */
+  focusVillage: (village) => {
+    const at = colony.villageCentres().get(village)
+    if (!at) return
+    if (rig.following) select(null, {})
+    rig.focus(new THREE.Vector3(at.x, 0, at.z), { distance: 70 })
+  },
+
+  /** A new hex in Sprint or Side-project. It stands on the map at once, empty. */
+  createHex: (village, name) => {
+    const clean = String(name || '').trim().slice(0, 80)
+    if (!clean || !['sprint', 'side'].includes(village)) return
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    state.hexes = { ...(state.hexes || {}), [id]: { village, name: clean, archived: false, createdAt: Date.now() } }
+    queueSave()
+    applyThreads(threads)
+    selectProject(hexPlotId(id), { fly: true })
+    hud.toast(`Added ${clean} to ${VILLAGE_LABEL[village]}`)
+  },
+
+  /**
+   * Fold a hex away with its threads, keeping where it stood so it comes back to the same spot.
+   * Threads still working or waiting would vanish with it, so that asks first.
+   */
+  archiveHex: (hexId) => {
+    const hex = state.hexes?.[hexId]
+    if (!hex || hex.archived) return
+    const plotId = hexPlotId(hexId)
+    const now = Date.now()
+    const inside = [...colony.threads.values()].filter((t) => colony.plotIdFor(t.id) === plotId)
+    const busy = inside.filter((t) => ['working', 'waiting', 'blocked'].includes(statusFor(t, now))).length
+    if (busy) {
+      const ok = window.confirm(
+        `${hex.name} has ${inside.length} thread${inside.length === 1 ? '' : 's'}, ${busy} still working or waiting on you. ` +
+          'Archiving takes them off the map until you restore the hex. Archive it?'
+      )
+      if (!ok) return
+    }
+    const cells = colony.forgetPlot(plotId)
+    state.hexes = { ...state.hexes, [hexId]: { ...hex, archived: true, ...(cells ? { cells } : {}) } }
+    if (selectedProject === plotId) selectedProject = null
+    if (selectedId && inside.some((t) => t.id === selectedId)) select(null, {})
+    queueSave()
+    applyThreads(threads)
+    hud.toast(`Archived ${hex.name}. Restore it from ${VILLAGE_LABEL[hex.village]} in the sidebar`)
+  },
+
+  renameHex: (hexId, name) => {
+    const hex = state.hexes?.[hexId]
+    const clean = String(name || '').trim().slice(0, 80)
+    if (!hex || !clean || clean === hex.name) return
+    state.hexes = { ...state.hexes, [hexId]: { ...hex, name: clean } }
+    queueSave()
+    applyThreads(threads)
+    hud.toast(`Renamed to ${clean}`)
+  },
+
+  restoreHex: (hexId) => {
+    const hex = state.hexes?.[hexId]
+    if (!hex?.archived) return
+    colony.rememberPlot(hexPlotId(hexId), hex.cells)
+    const { cells, ...rest } = hex
+    state.hexes = { ...state.hexes, [hexId]: { ...rest, archived: false } }
+    queueSave()
+    applyThreads(threads)
+    hud.toast(`${hex.name} is back`)
+  },
+
+  /** Put a thread in a hex, or back on its repo's plot in Misc when `hexId` is empty. */
+  moveThread: (threadId, hexId) => {
+    const thread = threads.find((t) => t.id === threadId)
+    if (!thread) return
+    const placements = { ...(state.placements || {}) }
+    // A session that follows its orchestrator (or a subagent its parent) is kept in Misc with a
+    // placement of its own; anything else going to Misc simply loses its placement.
+    const follows = !placements[threadId] && hexIdOfPlot(colony.plotIdFor(threadId))
+    if (hexId && state.hexes?.[hexId] && !state.hexes[hexId].archived) placements[threadId] = hexId
+    else if (follows) placements[threadId] = 'misc'
+    else delete placements[threadId]
+    if ((placements[threadId] || '') === (state.placements?.[threadId] || '')) return
+    state.placements = placements
+    queueSave()
+    applyThreads(threads)
+    const where = hexId && state.hexes[hexId] ? state.hexes[hexId].name : `${thread.project || 'its repo'} in Misc`
+    hud.toast(`Moved to ${where}`)
+  },
+
+  placeOptions: () => placeOptions(),
+  // Where it stands now, followed placements included, so the picker starts on the truth.
+  placementOf: (threadId) => hexIdOfPlot(colony.plotIdFor(threadId)) || '',
 
   copyProjectPath: async () => {
     const folder = selectedProject && pathForProject(selectedProject)
@@ -431,6 +538,12 @@ const chat = new Chat(hud.el, {
   onDone: async (thread) => {
     await poll()
     if (thread && chat.isOpen && chat.thread?.id === thread.id) markSeen(thread)
+  },
+  // A new thread started for a hex goes there before its first scan, so it never shows in Misc.
+  onStarted: (thread, hexId) => {
+    if (!thread?.id || !state.hexes?.[hexId] || state.hexes[hexId].archived) return
+    state.placements = { ...(state.placements || {}), [thread.id]: hexId }
+    queueSave()
   },
   needYou: needYouThreads,
   // The repo a chat belongs to, in the colour its plot wears on the map and in the list, so a
@@ -612,7 +725,8 @@ function select(id, { fly = false } = {}) {
     ambience.play(`select-${n}`, { x: agent.pos.x, y: agent.pos.y + 0.8, z: agent.pos.z, gain: 0.9 })
   }
   // Picking somebody is also picking the zone they are standing on: the sidebar follows.
-  if (thread?.project && colony.plots.has(thread.project)) selectedProject = thread.project
+  const standsOn = thread && colony.plotIdFor(thread.id)
+  if (standsOn && colony.plots.has(standsOn)) selectedProject = standsOn
   syncProject()
   if (fly) {
     rig.focus(new THREE.Vector3(agent.pos.x, 0, agent.pos.z), { distance: Math.min(rig.desiredDistance, 26) })
@@ -625,7 +739,7 @@ function selectProject(name, { fly = false } = {}) {
   if (!name || !colony.plots.has(name)) return
   selectedProject = name
   const current = threads.find((t) => t.id === selectedId)
-  if (current && current.project !== name) select(null, {})
+  if (current && colony.plotIdFor(current.id) !== name) select(null, {})
   else syncProject()
   if (fly) actions.focusProject(name)
 }
@@ -651,7 +765,7 @@ function harnessLabel(id) {
 function harnessForProject(name) {
   const counts = new Map()
   for (const thread of colony.threads.values()) {
-    if (thread.project !== name || !thread.harness) continue
+    if (colony.plotIdFor(thread.id) !== name || !thread.harness) continue
     counts.set(thread.harness, (counts.get(thread.harness) ?? 0) + 1)
   }
   let best = ''
@@ -667,7 +781,7 @@ function harnessForProject(name) {
 function pathForProject(name) {
   const counts = new Map()
   for (const thread of colony.threads.values()) {
-    if (thread.project !== name) continue
+    if (colony.plotIdFor(thread.id) !== name) continue
     const dir = thread.projectPath || thread.cwd
     if (!dir) continue
     counts.set(dir, (counts.get(dir) ?? 0) + 1)
@@ -682,12 +796,44 @@ function pathForProject(name) {
   return best
 }
 
+/**
+ * Where a thread can go, for the Move-to and New chat pickers: every live hex by village, newest
+ * last. Misc is not listed — it is the empty choice, the repo's own plot.
+ */
+function placeOptions() {
+  const out = []
+  for (const village of VILLAGES) {
+    if (village === 'misc') continue
+    const hexes = Object.entries(state.hexes || {})
+      .filter(([, h]) => h.village === village && !h.archived)
+      .sort((a, b) => a[1].createdAt - b[1].createdAt)
+      .map(([id, h]) => ({ id, name: h.name }))
+    out.push({ village, label: VILLAGE_LABEL[village], hexes })
+  }
+  return out
+}
+
+/** Each hex village with its archived hexes, for the sidebar. */
+function villageCatalog() {
+  const placed = new Map()
+  for (const hexId of Object.values(state.placements || {})) placed.set(hexId, (placed.get(hexId) || 0) + 1)
+  return VILLAGES.filter((v) => v !== 'misc').map((village) => ({
+    village,
+    label: VILLAGE_LABEL[village],
+    archived: Object.entries(state.hexes || {})
+      .filter(([, h]) => h.village === village && h.archived)
+      .sort((a, b) => b[1].createdAt - a[1].createdAt)
+      .map(([id, h]) => ({ id, name: h.name, count: placed.get(id) || 0 })),
+  }))
+}
+
 /** Push the open zone's current contents at the sidebar. Closes it if the zone is gone. */
 function syncProject() {
   const hidden = hiddenCatalog(state.hiddenProjects || [], threads)
   // Folded-away repos are listed alongside the ones you hid by hand. Same principle: nothing
   // leaves the map without somewhere on screen saying where it went.
   const folded = hiddenCatalog([...(colony.dormantProjects || [])], threads)
+  hud.setVillages(villageCatalog())
   const plot = selectedProject ? colony.plots.get(selectedProject) : null
   if (!plot) {
     selectedProject = null
@@ -697,7 +843,7 @@ function syncProject() {
   }
   const now = Date.now()
   const list = [...colony.threads.values()]
-    .filter((thread) => thread.project === plot.name)
+    .filter((thread) => colony.plotIdFor(thread.id) === plot.id)
     .map((thread) => ({
       id: thread.id,
       title: thread.title,
@@ -713,9 +859,12 @@ function syncProject() {
     })
 
   hud.setProject({
+    id: plot.id,
     name: plot.name,
+    village: plot.village,
+    hexId: plot.hexId,
     accent: plot.accent,
-    path: pathForProject(plot.name),
+    path: pathForProject(plot.id),
     threads: list,
     selectedId,
   })
@@ -941,7 +1090,7 @@ function liftPlot() {
   drag.candidate = null
   if (!plot) return // a poll rebuilt it out from under the hold — rare, and a lift of nothing
   drag.lifted = true
-  drag.name = plot.name
+  drag.name = plot.id
   drag.cells = plot.cells
   // The drag is relative to the cell the press landed on, not to the zone's root: snapping
   // the root under a cursor that grabbed the far corner would jump the zone half its own
@@ -996,7 +1145,7 @@ engine.canvas.addEventListener('pointerdown', (e) => {
   if (colony.pick(p.x, p.y, p.aspect)) return // a press on an astronaut is a selection
   const plot = plotUnder(e, p)
   if (!plot) return
-  drag.candidate = plot.name
+  drag.candidate = plot.id
   drag.startX = e.clientX
   drag.startY = e.clientY
   drag.timer = setTimeout(liftPlot, HOLD_MS)
@@ -1017,7 +1166,7 @@ window.addEventListener('pointermove', (e) => {
   // The plan, not just a yes/no: a drop that strands a zone is allowed, and what comes back
   // says where everything ends up. Kept so the drop applies exactly what the ghost was drawn
   // against rather than recomputing against a layout a poll may have moved on.
-  drag.plan = planMove(colony.visibleLayout(), drag.name, dq, dr)
+  drag.plan = colony.planDrag(drag.name, dq, dr)
   drag.valid = Boolean(drag.plan)
   placeGhost()
 })
@@ -1056,7 +1205,7 @@ engine.canvas.addEventListener('pointerup', (e) => {
   // opens that repo's sidebar, and bare ground closes that too.
   if (selectedId) select(null, {})
   const plot = plotUnder(e, p)
-  if (plot) selectProject(plot.name, {})
+  if (plot) selectProject(plot.id, {})
   else actions.closeProject()
 })
 
@@ -1244,15 +1393,23 @@ function applyThreads(list) {
   }
   if (firstSeen) queueSave()
 
-  const stats = colony.setThreads(list, archivedSet, hiddenSet, known)
+  const stats = colony.setThreads(list, archivedSet, hiddenSet, known, { hexes: state.hexes, placements: state.placements })
   hud.setStats(stats)
-  chimeForNewWaiting(list, archivedSet, hiddenSet)
+  rig.setWorldReach(colony.worldReach() + 20)
+  chimeForNewWaiting(list)
 
+  const counts = new Map()
+  for (const t of list) {
+    const at = colony.plotIdFor(t.id)
+    if (at) counts.set(at, (counts.get(at) || 0) + 1)
+  }
   legendProjects = colony.plotOrder
     .map((plot) => ({
-      name: plot.name,
+      name: plot.id,
+      label: plot.name,
+      village: plot.village,
       accent: plot.accent,
-      count: list.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
+      count: counts.get(plot.id) || 0,
       urgent: colony.urgentPlots?.has(plot.id) ?? false,
     }))
     .sort((a, b) => b.count - a.count)
@@ -1317,11 +1474,13 @@ function shareRuns(list, archivedSet) {
 const waitingBefore = new Set()
 let seenFirstRoster = false
 let lastChime = 0
-function chimeForNewWaiting(list, archivedSet, hiddenSet) {
+function chimeForNewWaiting(list) {
   const now = Date.now()
   const waiting = new Set()
   for (const t of list) {
-    if (archivedSet.has(t.id) || hiddenSet.has(t.project)) continue
+    // Only what is on the map: a thread in an archived hex, or unplaced in a hidden repo, is
+    // somewhere you chose not to look. A thread placed in a hex of a hidden repo still counts.
+    if (!colony.plotIdFor(t.id)) continue
     if (statusFor(t, now) === 'waiting') waiting.add(t.id)
   }
   const fresh = []

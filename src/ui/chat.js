@@ -10,7 +10,7 @@
  * ends one early. Which chat was open is remembered for the tab, so a reload brings it back.
  */
 import { filesRead, chatAttach, chatCommands, chatFile, chatMessages, chatMode, chatModel, chatPermission, chatSend, chatStart, chatStop, shareReport } from '../game/api.js'
-import { ICON, shortModel } from './hud.js'
+import { ICON, placeOptionNodes, shortModel } from './hud.js'
 import { renderMarkdown } from './markdown.js'
 import { LinkPanel } from './link-panel.js'
 import { prPill, prsFor } from './hover-card.js'
@@ -19,7 +19,7 @@ import { codeQuote } from './file-view.js'
 const TEMPLATE = `
 <div class="sheet panel">
   <div class="chat-head">
-    <div class="info"><div class="repo-tag" hidden></div><div class="head-prs" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select></div>
+    <div class="info"><div class="repo-tag" hidden></div><div class="head-prs" hidden></div><div class="title"></div><div class="sub"></div><select class="select repo-pick" aria-label="Repo" hidden></select><select class="select place-pick" aria-label="Village and hex" title="Where the new thread lands on the map" hidden></select></div>
     <button class="btn ghost" data-report title="You talked to this repo session yourself: pass that conversation on to its orchestrator" hidden>Report to orchestrator</button>
     <button class="btn ghost" data-next title="Next thread that needs you (⌥N)" hidden></button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
@@ -218,8 +218,11 @@ export class Chat {
    * `needYou` lists the chattable threads asking for you, most pressing first; `go` takes the
    * popup, and the map, to one of them.
    */
-  constructor(parent, { onDone, needYou = () => [], go, repoOf = () => null } = {}) {
+  constructor(parent, { onDone, onStarted, needYou = () => [], go, repoOf = () => null } = {}) {
     this.repoOf = repoOf
+    // A new thread has named itself: `(thread, hexId)`, so the page can place it before it is
+    // ever drawn in Misc. Fired even when the popup has moved on to another thread.
+    this.onStarted = onStarted
     this.onDone = onDone
     this.needYou = needYou
     this.go = go
@@ -680,6 +683,7 @@ export class Chat {
     this.showModel(thread?.model)
     this.$('.sub').hidden = false
     this.$('.repo-pick').hidden = true
+    this.$('.place-pick').hidden = true
     // Only a repo session of a shared run has an orchestrator to tell.
     this.$('[data-report]').hidden = thread?.share?.role !== 'child'
     this.input.placeholder = placeholder
@@ -709,7 +713,7 @@ export class Chat {
    * An empty popup for a new Claude Code thread in `folder`. Its first message starts the
    * thread, and from then on it is a chat like any other.
    */
-  openNew({ folder, name, repos = [] }) {
+  openNew({ folder, name, repos = [], places = [], place = '' }) {
     if ((this.runId || this.starting) && !this.thread && this.folder === folder) {
       this.el.classList.add('open')
       return this.input.focus()
@@ -730,10 +734,23 @@ export class Chat {
     )
     pick.title = folder
     pick.hidden = false
+    this.showPlaces(places, place)
     this.$('.sub').hidden = true
     this.note('')
     this.sync()
     this.input.focus()
+  }
+
+  /**
+   * Where the new thread lands on the map: Misc (its repo's plot) unless a hex is picked. A
+   * village with no hexes says so rather than offering nothing.
+   */
+  showPlaces(places, place) {
+    const pick = this.$('.place-pick')
+    const options = placeOptionNodes(places, 'Misc · its repo plot')
+    pick.replaceChildren(...options)
+    pick.value = places.some((v) => v.hexes.some((h) => h.id === place)) ? place : ''
+    pick.hidden = false
   }
 
   /** Where the new thread will start. "Other folder" asks for a path; the server checks it. */
@@ -899,6 +916,7 @@ export class Chat {
     this.$('[data-stop]').hidden = !running
     this.input.disabled = this.blocked
     this.$('.repo-pick').disabled = running
+    this.$('.place-pick').disabled = running
   }
 
   async send() {
@@ -922,10 +940,13 @@ export class Chat {
     this.input.value = ''
     this.add('user', text)
     const reply = this.add('assistant')
+    const place = thread ? '' : this.$('.place-pick').value
     this.starting = true
     this.sync()
     try {
       const { runId } = await (thread ? chatSend(thread, text, this.mode(), this.model()) : chatStart(folder, text, this.mode(), this.model()))
+      // A new one is put in its hex from its first event, however the popup moves on meanwhile.
+      if (place) this.catchSession(runId, place)
       // Moved on while it was starting: it runs anyway, and is there when its thread is opened.
       if (this.thread !== thread || this.folder !== folder) return
       this.starting = false
@@ -936,6 +957,28 @@ export class Chat {
         reply.append(div('err', err.message))
         this.sync()
       }
+    }
+  }
+
+  /**
+   * Listen to a run only until its session names itself, to place the new thread. Its own stream,
+   * so switching the popup to another thread (which aborts the view's) cannot lose the placement.
+   */
+  async catchSession(runId, place) {
+    const stop = new AbortController()
+    try {
+      await chatAttach(
+        runId,
+        0,
+        (event) => {
+          if (event.type !== 'session') return
+          this.onStarted?.(event.thread, place)
+          stop.abort()
+        },
+        stop.signal
+      )
+    } catch {
+      // Gone before it named itself: nothing to place, and it lands in Misc like any thread.
     }
   }
 
@@ -978,6 +1021,7 @@ export class Chat {
       this.folder = null
       // Started: its folder is settled now.
       this.$('.repo-pick').hidden = true
+      this.$('.place-pick').hidden = true
       this.$('.sub').hidden = false
       this.$('.title').textContent = current.title
       this.showRepo(current)

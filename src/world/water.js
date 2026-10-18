@@ -354,7 +354,7 @@ const FRAGMENT_EMISSIVE = /* glsl */ `
 export function createWater({ planet, heightAt, size = 340, segments, quality = 'medium' } = {}) {
   if (!planet?.water) return null
   const cfg = { ...DEFAULTS, ...planet.water }
-  let segs = segments || SEGMENTS[quality] || SEGMENTS.medium
+  let segs = segments || Math.round((SEGMENTS[quality] || SEGMENTS.medium) * (size / 340))
 
   const uniforms = {
     uTime: { value: 0 },

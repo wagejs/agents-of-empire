@@ -192,9 +192,12 @@ export class Astronauts {
     this.nav = null
     // The first roster of a page load comes out of the ship one at a time — see `setRoster`.
     this._rosters = 0
-    this._queue = []
-    this._queueTimer = 0
-    this._queueEvery = 0.3
+    /**
+     * One entrance queue per door: Misc's ship, and the castle on each village island. Each lets
+     * its own crew out at its own pace, so the islands fill up alongside the town rather than
+     * after it.
+     */
+    this._queues = new Map()
   }
 
   // ── construction ────────────────────────────────────────────────────────────────────
@@ -594,7 +597,16 @@ export class Astronauts {
     const queued = []
     for (const entry of wanted) {
       seen.add(entry.id)
-      const existing = this.byId.get(entry.id)
+      let existing = this.byId.get(entry.id)
+      // Moved to another village: it comes out of that island's castle rather than walking
+      // over, which a world without bridges could not let it do anyway.
+      if (existing && existing.home !== (entry.home || 'misc') && existing.state !== 'leaving') {
+        this.agents.splice(this.agents.indexOf(existing), 1)
+        this.byId.delete(existing.id)
+        existing = null
+        this._spawnAgent(entry, true)
+        continue
+      }
       if (existing) {
         this._updateAgent(existing, entry)
         continue
@@ -612,11 +624,14 @@ export class Astronauts {
     }
     if (queued.length) {
       queued.sort((a, b) => rosterRank(a) - rosterRank(b))
-      this._queue.push(...queued)
+      for (const agent of queued) {
+        let q = this._queues.get(agent.home)
+        if (!q) this._queues.set(agent.home, (q = { list: [], timer: 0.4, every: 0.3, lastOut: null }))
+        q.list.push(agent)
+      }
       // Spread over roughly half a minute, but never so fast it is a crowd nor so slow a
       // small colony takes an age to arrive.
-      this._queueEvery = THREE.MathUtils.clamp(40 / this._queue.length, 0.35, 0.8)
-      this._queueTimer = 0.4
+      for (const q of this._queues.values()) q.every = THREE.MathUtils.clamp(40 / Math.max(1, q.list.length), 0.35, 0.8)
     }
 
     // Off the scan: walk home. Merely over the budget: gone, no ceremony — walking a
@@ -631,8 +646,9 @@ export class Astronauts {
   }
 
   _spawnAgent(entry, walksOut = true) {
-    const door = this.world?.shipDoor?.() || new THREE.Vector3(0, 0, 0)
-    const airlock = this.world?.shipAirlock?.() || door
+    const home = entry.home || 'misc'
+    const door = this.world?.shipDoor?.(home) || new THREE.Vector3(0, 0, 0)
+    const airlock = this.world?.shipAirlock?.(home) || door
     const jitter = () => (Math.random() - 0.5) * 1.4
     // Out of the airlock and down the ramp, or straight onto its plot, a pace off the exact
     // spot so a zone's crew does not appear in a stack. The nav grid sorts out anything
@@ -651,6 +667,8 @@ export class Astronauts {
 
     const agent = {
       id: entry.id,
+      /** Which door this astronaut comes out of and goes home to: its village's. */
+      home,
       thread: entry.thread,
       status: entry.status,
       site: entry.site ? entry.site.clone() : new THREE.Vector3(),
@@ -794,8 +812,8 @@ export class Astronauts {
   }
 
   /** Close enough to the ramp that standing still there is in somebody's way. */
-  _nearDoor(pos) {
-    const door = this.world?.shipDoor?.()
+  _nearDoor(pos, home) {
+    const door = this.world?.shipDoor?.(home)
     if (!door) return false
     const dx = pos.x - door.x
     const dz = pos.z - door.z
@@ -822,7 +840,7 @@ export class Astronauts {
     agent.loop = null
     agent.faceFrame = FACE.wink
     agent.pathVersion = -1
-    const door = this.world?.shipDoor?.()
+    const door = this.world?.shipDoor?.(agent.home)
     if (door) agent.site.copy(door)
   }
 
@@ -865,40 +883,39 @@ export class Astronauts {
     return write
   }
 
-  /** Let the next queued astronaut out of the ship when its turn comes. */
+  /** Let the next queued astronaut out of each door when its turn comes. */
   _releaseQueued(dt) {
-    if (!this._queue.length) return
-    this._queueTimer -= dt
-    if (this._queueTimer > 0) return
-    // Not while the last one out is still on the ramp or standing at its foot — a queue,
-    // not a pile — unless it has been a long time, in which case it is stuck and the rest
-    // should not wait behind it.
-    const last = this._lastOut
-    if (last && last.state !== 'gone' && this._queueTimer > -2) {
-      // Far enough down the ramp that the next one has a step of its own.
-      if (last.ramp < 0.4) return
+    for (const [home, q] of this._queues) {
+      if (!q.list.length) continue
+      q.timer -= dt
+      if (q.timer > 0) continue
+      // Not while the last one out is still on the ramp or standing at its foot — a queue,
+      // not a pile — unless it has been a long time, in which case it is stuck and the rest
+      // should not wait behind it.
+      const last = q.lastOut
+      if (last && last.state !== 'gone' && q.timer > -2 && last.ramp < 0.4) continue
+      q.timer = q.every
+      let agent = q.list.shift()
+      // Anyone that left the roster while still inside is simply not there.
+      while (agent && (agent.state !== 'queued' || !this.byId.has(agent.id))) agent = q.list.shift()
+      if (!agent) continue
+      agent.state = 'spawning'
+      agent.stateAge = 0
+      agent.clipKey = 'spawn'
+      agent.clipTime = 0
+      agent.pathVersion = -1
+      // Out of the airlock as it stands now — the ship may have moved since the roster.
+      const airlock = this.world?.shipAirlock?.(home)
+      const door = this.world?.shipDoor?.(home)
+      if (airlock && door) {
+        agent.rampFrom.copy(airlock)
+        agent.rampTo.set(door.x + (Math.random() - 0.5) * 0.7, door.y, door.z + (Math.random() - 0.5) * 0.7)
+        agent.pos.copy(airlock)
+        agent.groundAt = airlock.y
+        agent.groundY = airlock.y
+      }
+      q.lastOut = agent
     }
-    this._queueTimer = this._queueEvery
-    let agent = this._queue.shift()
-    // Anyone that left the roster while still inside is simply not there.
-    while (agent && (agent.state !== 'queued' || !this.byId.has(agent.id))) agent = this._queue.shift()
-    if (!agent) return
-    agent.state = 'spawning'
-    agent.stateAge = 0
-    agent.clipKey = 'spawn'
-    agent.clipTime = 0
-    agent.pathVersion = -1
-    // Out of the airlock as it stands now — the ship may have moved since the roster.
-    const airlock = this.world?.shipAirlock?.()
-    const door = this.world?.shipDoor?.()
-    if (airlock && door) {
-      agent.rampFrom.copy(airlock)
-      agent.rampTo.set(door.x + (Math.random() - 0.5) * 0.7, door.y, door.z + (Math.random() - 0.5) * 0.7)
-      agent.pos.copy(airlock)
-      agent.groundAt = airlock.y
-      agent.groundY = airlock.y
-    }
-    this._lastOut = agent
   }
 
   /**
@@ -980,7 +997,10 @@ export class Astronauts {
         // and the next poll hands it a site that has been checked against the grid.
         // Stuck for a couple of seconds gets a fresh route; stuck for longer gives up.
         if (agent.stuckFor > 2 && agent.stuckFor < 2.05) agent.pathVersion = -1
-        const stuck = agent.stuckFor > 5 || (agent.blocked && agent.stateAge > 8) || agent.stateAge > 45
+        // The time limit grows with the road still ahead: a walk out to a village island across
+        // a bridge is long, and an astronaut still striding along it is not stuck.
+        const timeLimit = 45 + (dist / (agent.speed || WALK_SPEED)) * 1.5
+        const stuck = agent.stuckFor > 5 || (agent.blocked && agent.stateAge > 8) || agent.stateAge > timeLimit
         // Creeping the last metre for ten seconds — a crowd at the site, a spot just inside
         // a keep circle — is close enough.
         const nearEnough = dist < ARRIVE_RADIUS * 1.9 && agent.stateAge > 10
@@ -990,7 +1010,7 @@ export class Astronauts {
           // of the doorway would claim the doorway, and the queue behind it inherits a
           // permanent wall. Out there it keeps its real site and tries again, which the crowd
           // thinning out is usually enough to fix.
-          const inDoorway = this._nearDoor(agent.pos)
+          const inDoorway = this._nearDoor(agent.pos, agent.home)
           if (stuck && dist >= ARRIVE_RADIUS && !inDoorway) agent.site.copy(agent.pos)
           if (stuck && inDoorway) {
             agent.stateAge = 0

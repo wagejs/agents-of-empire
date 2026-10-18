@@ -586,6 +586,15 @@ export const PLANETS = {
 export const PLANET_ORDER = ['moon', 'mars', 'terra', 'medieval', 'beach', 'ocean', 'jungle', 'desert', 'tundra', 'autumn', 'sakura', 'volcanic', 'sky']
 
 export const GROUND_SIZE = 340
+/**
+ * The ground actually built: the default, or more when village islands stand further out than
+ * it reaches. Detail grows with it so a bigger plane is not a coarser one.
+ */
+let _groundSize = GROUND_SIZE
+export const groundSize = () => _groundSize
+export function setGroundSize(size) {
+  _groundSize = Math.max(GROUND_SIZE, Math.ceil(size / 20) * 20)
+}
 /** Everything inside this radius is the buildable colony, and is kept nearly flat. */
 export const COLONY_RADIUS = 46
 const DETAIL_SEGMENTS = { low: 72, medium: 128, high: 190 }
@@ -602,6 +611,24 @@ const ISLAND_SHELF = 26
 /** The hex cells the island is built around — the colony hands them over as it grows. */
 let _islandCells = []
 let _islandReach = ISLAND_RADIUS
+/**
+ * More ground kept flat, past the colony's own circle: the village islands out at sea and the
+ * bridges to them. Circles `{ x, z, r }` and corridors `{ x0, z0, x1, z1, r }`.
+ */
+let _flats = []
+
+/** Hand the terrain the extra flat ground. Rebuild the terrain after a change. */
+export function setFlatAreas(list) {
+  _flats = list
+}
+
+function flatDistance(f, x, z) {
+  if (f.x0 === undefined) return Math.hypot(x - f.x, z - f.z)
+  const dx = f.x1 - f.x0
+  const dz = f.z1 - f.z0
+  const t = THREE.MathUtils.clamp(((x - f.x0) * dx + (z - f.z0) * dz) / (dx * dx + dz * dz || 1), 0, 1)
+  return Math.hypot(x - (f.x0 + dx * t), z - (f.z0 + dz * t))
+}
 /** How far under the sea the bed settles, on either shape. Deep enough to read as sea. */
 const SEA_DEPTH = 7
 /** How far past the plots a floating island's ground reaches: a grass margin, then nothing. */
@@ -616,8 +643,8 @@ export const SKY_MAX_CELLS = 96
  * mottling for free rather than costing a texture fetch.
  */
 export function createTerrain(planet, detail, seed = 1337) {
-  const segments = DETAIL_SEGMENTS[detail] || DETAIL_SEGMENTS.medium
-  const geo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE, segments, segments)
+  const segments = Math.round((DETAIL_SEGMENTS[detail] || DETAIL_SEGMENTS.medium) * (_groundSize / GROUND_SIZE))
+  const geo = new THREE.PlaneGeometry(_groundSize, _groundSize, segments, segments)
   geo.rotateX(-Math.PI / 2)
 
   const field = fieldFor(planet, seed)
@@ -754,7 +781,11 @@ export function createTerrain(planet, detail, seed = 1337) {
 function sampleHeight(x, z, field, planet) {
   const { noise, craters, islets } = field
   const dist = Math.hypot(x, z)
-  const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+  let outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+  for (let i = 0; i < _flats.length && outside > 0; i++) {
+    const f = _flats[i]
+    outside = Math.min(outside, THREE.MathUtils.smoothstep(flatDistance(f, x, z), f.r - 6, f.r + 40))
+  }
   const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
   let broad = fbm(noise, x * 0.012, z * 0.012, 4)
   // On a world whose water is meant to sit in its hollows — lakes, ponds, lava pools —

@@ -6,15 +6,17 @@ import { Fauna } from '../world/fauna.js'
 import { BuildingSurfaces } from '../world/building-surfaces.js'
 import { createGrass } from '../world/grass.js'
 import { createSkyIsland } from '../world/skyisland.js'
-import { SKY_MARGIN, SKY_MAX_CELLS, setIslandFootprint } from '../world/planet.js'
+import { SKY_MARGIN, SKY_MAX_CELLS, groundSize, setFlatAreas, setGroundSize, setIslandFootprint } from '../world/planet.js'
 import { createHexIsland } from '../world/hexisland.js'
-import { WALL_HALF_WIDTH, blockedByMap, boardMap, createHexBoard, growTown, layoutBoard, layoutFromMap, townGrowth, wallRuns } from '../world/hexboard.js'
+import { LAND_RINGS, WALL_HALF_WIDTH, blockedByMap, boardMap, createHexBoard, growTown, layoutBoard, layoutFromMap, townGrowth, wallRuns } from '../world/hexboard.js'
 import { bendPoint } from '../core/curve.js'
 import { Sky } from '../world/sky.js'
 import {
   Plot,
-  allocateCells,
+  allocateWorld,
+  anchorKey,
   cellsNeeded,
+  hexToWorld,
   shipPosition,
   createLabel,
   hashString,
@@ -23,7 +25,8 @@ import {
   PLOT_PALETTE,
   PLOT_CELL,
 } from '../world/plots.js'
-import { SHIP_CELL, setBlockedCells, translateCells } from '../world/plot-move.js'
+import { SHIP_CELL, hexDistance, planMove, setBlockedCells, translateCells, withoutBlocked } from '../world/plot-move.js'
+import { createBridge } from '../world/bridge.js'
 import { createBuilding, buildingUniforms, medievalLook, Scaffolds } from '../world/buildings.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
@@ -31,7 +34,7 @@ import { Indicators, BADGE } from '../agents/indicators.js'
 import { MAX_AGENT_CAP } from '../core/settings.js'
 import { Particles } from '../agents/particles.js'
 import { Navigation } from '../agents/navigation.js'
-import { liveThreadsForColony } from './hidden-projects.js'
+import { VILLAGES, VILLAGE_LABEL, placeThreads } from './villages.js'
 
 /**
  * The colony: everything that turns a list of agent threads into a place.
@@ -212,6 +215,8 @@ export class Colony {
     // An island world is shaped around the colony: the coast has to know the cells first.
     // A tiled world brings its own land: the terrain is all sea bed, bar a hump under the
     // middle that the tiles cover.
+    // Big enough to reach past the farthest island, with its meadow and a stretch of sea.
+    setGroundSize(2 * (this.worldReach() + PLOT_CELL * 1.5 * (LAND_RINGS + 3)))
     if (this.planet.board) setIslandFootprint([], PLOT_CELL)
     else if (this.planet.shape === 'island') setIslandFootprint(this._footprintCells(), PLOT_CELL)
     this.terrain = createTerrain(this.planet, this.settings.get('groundDetail'))
@@ -227,6 +232,7 @@ export class Colony {
     const ship = shipPosition()
     this.ship.group.position.y = this.board ? DECK_TOP : terrainHeight(ship.x, ship.z, this.planet)
     this.ship.setStyle(this.planet.board ? 'castle' : 'ship')
+    for (const v of this.villageShips?.values() || []) this._seatShip(v)
 
     this._dustTint.set(this.planet.ground.high)
 
@@ -243,6 +249,7 @@ export class Colony {
       })
     }
     this._syncFaunaSites()
+    this._terrainVersion = (this._terrainVersion || 0) + 1
   }
 
   /** The Medieval planet's hex tiles, laid around whatever cells the colony holds now. */
@@ -254,15 +261,50 @@ export class Colony {
       this.board = null
     }
     this.boardCells = null
-    if (!this.planet.board) return
+    this.villageBoard = null
+    if (!this.planet.board) {
+      // Off Medieval: whatever bridges and gates the last planet had go with it.
+      this.wallGates = new Set()
+      this._bridgeSignature = null
+      this._syncBridges()
+      return
+    }
     const footprint = [SHIP_CELL]
-    for (const plot of this.plotOrder || []) footprint.push(...plot.cells)
+    for (const plot of this.plotOrder || []) if (!plot.village || plot.village === 'misc') footprint.push(...plot.cells)
     // A map painted in tools/map-editor.html wins; without one the island is generated.
     const map = growTown(boardMap(), this.townGrowth || 0)
     const cells = map ? layoutFromMap(map, footprint) : layoutBoard(footprint)
-    this.board = createHexBoard(cells, DECK_TOP)
-    if (!this.board) return // the kit is not in yet; `onAssetsReady` builds the terrain again
+    // Each village island is the same template as a generated Misc: its town walled round its
+    // plots and castle, then meadow, a river and the coast. Grown about the island's own middle
+    // so every island comes out the same shape for the same plots.
+    this.villageBoard = new Map()
+    for (const [village, a] of this.villageAnchors || []) {
+      const own = [...this._islandLand().filter((c) => c.village === village)]
+      if (!own.length) continue
+      for (const p of this.plotOrder || []) if (p.village === village) own.push(...p.cells)
+      const keys = new Set()
+      const seed = village === 'sprint' ? 11 : 23
+      for (const cell of layoutBoard(own.map((c) => ({ q: c.q - a.q, r: c.r - a.r })), seed).values()) {
+        cell.q += a.q
+        cell.r += a.r
+        const k = `${cell.q},${cell.r}`
+        if (cells.has(k)) continue
+        cells.set(k, cell)
+        keys.add(k)
+      }
+      this.villageBoard.set(village, keys)
+    }
+    // The coast may have moved under a bridge's landward end, and where the bridges land
+    // decides which runs of wall are gates and where the road out to each one runs.
     this.boardCells = cells
+    this._bridgeSignature = null
+    this._syncBridges()
+    this.wallGates = this._wallGates(cells)
+    this.board = createHexBoard(cells, DECK_TOP, { gates: this.wallGates })
+    if (!this.board) {
+      this.boardCells = null
+      return // the kit is not in yet; `onAssetsReady` builds the terrain again
+    }
     this.worldGroup.add(this.board)
     // The walls just moved, or arrived: the crew has to know where they are now.
     if (this.nav) this._rebuildNavigation()
@@ -320,6 +362,7 @@ export class Colony {
     }
     const ship = shipPosition()
     list.push({ x: ship.x, z: ship.z })
+    for (const c of this._islandLand()) list.push(hexToWorld(c.q, c.r))
     return list.slice(0, SKY_MAX_CELLS)
   }
 
@@ -382,6 +425,7 @@ export class Colony {
     const detail = this.settings.get('groundDetail')
     this.water = createWater({
       planet: this.planet,
+      size: groundSize(),
       heightAt: (x, z) => terrainHeight(x, z, this.planet),
       quality: detail === 'high' ? 'high' : detail === 'low' ? 'low' : 'medium',
     })
@@ -416,6 +460,14 @@ export class Colony {
       }
     }
     const ship = shipPosition()
+    for (const c of this._islandLand()) clear.push({ ...hexToWorld(c.q, c.r), r: 8.6 })
+    // Nothing grows on a bridge, or in the way onto one.
+    for (const b of this.bridges || []) {
+      const steps = Math.ceil(Math.hypot(b.to.x - b.from.x, b.to.z - b.from.z) / 3)
+      for (let i = 0; i <= steps; i++) {
+        clear.push({ x: b.from.x + ((b.to.x - b.from.x) * i) / steps, z: b.from.z + ((b.to.z - b.from.z) * i) / steps, r: 4.5 })
+      }
+    }
     clear.push({ x: ship.x, z: ship.z, r: 7.5 })
     // A tiled world is dressed by its tiles — see hexboard.js.
     const density = this.planet.board ? 0 : this.settings.get('scatterDensity')
@@ -474,7 +526,15 @@ export class Colony {
     this.reflections.invalidate()
     this._applyPlanetTint()
     this.sky.setPlanet(planet)
-    this._buildTerrain()
+    // Where the village islands stand depends on the planet (Medieval's painted coast pushes
+    // them out), so place them for this one first: building the ground round last planet's
+    // islands drops them on this one's mainland until the next scan moves them.
+    const built = this._terrainVersion
+    if (this._lastRoster) {
+      const [threads, archivedIds, hiddenProjects, , villages] = this._lastRoster
+      this.setThreads(threads, archivedIds, hiddenProjects, new Set(this.threads.keys()), villages)
+    }
+    if (this._terrainVersion === built) this._buildTerrain()
     this.astronauts.setCrewStyle(planet.crew)
     for (const plot of this.plots.values()) plot.setGround(this._groundStyle())
     // A planet with buildings of its own rebuilds every standing one now, not on the next scan.
@@ -511,17 +571,25 @@ export class Colony {
    * ids — repo name for plots, session id for buildings — so a poll that changes nothing
    * moves nothing on screen.
    */
-  setThreads(threads, archivedIds = new Set(), hiddenProjects = new Set(), knownIds = new Set()) {
+  setThreads(threads, archivedIds = new Set(), hiddenProjects = new Set(), knownIds = new Set(), villages = {}) {
+    this._lastRoster = [threads, archivedIds, hiddenProjects, knownIds, villages]
     const now = Date.now()
-    const live = liveThreadsForColony(threads, archivedIds, hiddenProjects)
-
-    // Group by repo, biggest project first so the busiest work lands nearest the middle.
+    // Where every thread goes: a hex you put it in, or its repo's plot in Misc. Plots are keyed
+    // by that group's id — the repo name for Misc, `hex:<id>` for a hex.
+    const { groups } = placeThreads({
+      threads,
+      archivedIds,
+      hiddenProjects,
+      hexes: villages.hexes,
+      placements: villages.placements,
+    })
+    this.plotMeta = groups
     const byProject = new Map()
-    for (const thread of live) {
-      const key = thread.project || 'unknown'
-      if (!byProject.has(key)) byProject.set(key, [])
-      byProject.get(key).push(thread)
-    }
+    for (const [id, group] of groups) byProject.set(id, group.threads)
+    const live = [...groups.values()].flatMap((g) => g.threads)
+    // Which plot each thread stands on, for anything that has to find it from the thread.
+    this.plotOfThread = new Map()
+    for (const [id, group] of groups) for (const t of group.threads) this.plotOfThread.set(t.id, id)
     /**
      * Repos where nothing has stirred in days, folded away on request.
      *
@@ -537,6 +605,8 @@ export class Colony {
     const dormant = new Set()
     if (this.settings.get('hideDormant')) {
       for (const [name, list] of byProject) {
+        // Misc only: a hex is somewhere you put work on purpose, and an empty one is not dormant.
+        if (groups.get(name)?.village !== 'misc') continue
         if (list.every((t) => statusFor(t, now) === 'sleeping')) dormant.add(name)
       }
       // Never fold away everything: a colony that answers a poll with an empty planet reads as
@@ -545,6 +615,7 @@ export class Colony {
       for (const name of dormant) byProject.delete(name)
     }
     this.dormantProjects = dormant
+    for (const name of dormant) for (const t of groups.get(name).threads) this.plotOfThread.delete(t.id)
 
     const projects = [...byProject.entries()].sort((a, b) => {
       if (b[1].length !== a[1].length) return b[1].length - a[1].length
@@ -608,6 +679,8 @@ export class Colony {
 
         roster.push({
           id: thread.id,
+          // Its village's castle is where it comes out and goes home.
+          home: plot.village && this.villageShips?.has(plot.village) ? plot.village : 'misc',
           thread,
           status,
           site: null, // assigned after all buildings have reached the navigation map
@@ -649,18 +722,25 @@ export class Colony {
     // A painted map's roads, rivers and woods stay put: zones grow round them.
     // The town grows when the colony outgrows it: the wall and all beyond it move out a ring.
     // Never back in, so a repo going quiet does not knock the wall down on its neighbours.
-    const sizes = projects.map(([name, list]) => ({ id: name, size: list.length }))
+    const sizes = projects.map(([name, list]) => ({ id: name, size: list.length, village: this.plotMeta?.get(name)?.village }))
     if (this.planet.board && boardMap()) {
-      const need = sizes.reduce((n, p) => n + cellsNeeded(p.size), 0)
+      // Only Misc is in town: the village islands stand out at sea, past the wall.
+      const need = sizes.filter((p) => !p.village || p.village === 'misc').reduce((n, p) => n + cellsNeeded(p.size), 0)
       const grown = townGrowth(boardMap(), need, this.townGrowth || 0)
       if (grown !== (this.townGrowth || 0)) this._townGrew = true
       this.townGrowth = grown
     }
     setBlockedCells(this.planet.board ? blockedByMap(growTown(boardMap(), this.townGrowth || 0)) : [])
-    const layout = allocateCells(sizes, this.plotCells)
+    // Misc as it always was, and each village an island of its own out at sea.
+    // A painted map is land of its own: the islands stand out past its coast.
+    const painted = this.planet.board && growTown(boardMap(), this.townGrowth || 0)
+    const mainland = painted ? new Set(painted.cells.map(([q, r]) => `${q},${r}`)) : null
+    const { layout, anchors, memory } = allocateWorld(sizes, this.plotCells, { mainland, landRings: this.planet.board ? LAND_RINGS : 0 })
+    this.villageAnchors = anchors
     // Remembered, not replaced: a project that has just lost its last thread keeps its
-    // ground on the books, and the oldest entries fall off the end.
-    for (const [name, cells] of layout) {
+    // ground on the books, and the oldest entries fall off the end. The island middles ride
+    // along under their own keys, refreshed every pass so they are never the oldest.
+    for (const [name, cells] of memory) {
       this.plotCells.delete(name)
       this.plotCells.set(name, cells)
     }
@@ -684,29 +764,50 @@ export class Colony {
     }
 
     projects.forEach(([name], index) => {
-      if (this.plots.has(name)) return
+      const standing = this.plots.get(name)
+      // A hex renamed since: new name plate, same ground.
+      const renamed = this.plotMeta?.get(name)?.name
+      if (standing && renamed && standing.name !== renamed) {
+        standing.name = renamed
+        this.labelGroup.remove(standing.label)
+        standing.label.userData.dispose?.()
+        standing.label = createLabel(renamed, standing.accent)
+        standing.label.position.set(standing.labelAnchor.x, 3.2, standing.labelAnchor.z)
+        this.labelGroup.add(standing.label)
+      }
+      if (standing) return
       const cells = layout.get(name)
       if (!cells?.length) return
       const accent = this._pickAccent(name)
-      const plot = new Plot({ id: name, name, index, cells, accent })
+      const meta = this.plotMeta?.get(name)
+      const label = meta?.name || name
+      const plot = new Plot({ id: name, name: label, index, cells, accent })
+      plot.village = meta?.village || 'misc'
+      plot.hexId = meta?.hexId || null
       plot.setGround(this._groundStyle())
       plot.signature = wanted.get(name)
       this.plots.set(name, plot)
       this.plotGroup.add(plot.group)
 
-      const label = createLabel(name, accent)
-      label.position.set(plot.labelAnchor.x, 3.2, plot.labelAnchor.z)
-      plot.label = label
-      this.labelGroup.add(label)
+      const tag = createLabel(label, accent)
+      tag.position.set(plot.labelAnchor.x, 3.2, plot.labelAnchor.z)
+      plot.label = tag
+      this.labelGroup.add(tag)
     })
 
     this.plotOrder = [...this.plots.values()]
+    this._syncVillageShips()
+    this._syncBridges()
+    this._syncVillageLabels()
     // Zones that just moved, appeared or grew are zones the scatter does not know about —
     // nor, on a floating island, the rock under them; and on an island in the sea, the
     // coast itself moves, which is the whole terrain.
-    if (this.scatterGroup && (this._townGrew || this._plotFootprint() !== this._scatterFootprint)) {
+    if (this.scatterGroup && (this._townGrew || this._flatsChanged || this._plotFootprint() !== this._scatterFootprint)) {
       this._townGrew = false
-      if (this.planet.shape === 'island' || this.planet.board) this._buildTerrain()
+      const flatsChanged = this._flatsChanged
+      this._flatsChanged = false
+      // New flat ground is a new height field: the whole terrain, not just what stands on it.
+      if (this.planet.shape === 'island' || this.planet.board || flatsChanged) this._buildTerrain()
       else {
         this._buildScatter()
         if (this.island) this._syncIslandRock()
@@ -732,8 +833,9 @@ export class Colony {
   /** The bits of the world the crew needs to know about, as plain callbacks. */
   _world() {
     return {
-      shipDoor: () => this.ship.shipDoor(),
-      shipAirlock: () => this.ship.shipAirlock(),
+      // Each village island has a castle of its own; its crew come and go by that door.
+      shipDoor: (home) => (this.villageShips?.get(home)?.ship || this.ship).shipDoor(),
+      shipAirlock: (home) => (this.villageShips?.get(home)?.ship || this.ship).shipAirlock(),
       groundAt: (x, z) => this.groundAt(x, z),
     }
   }
@@ -742,6 +844,7 @@ export class Colony {
     const cell = worldToHex(x, z)
     if (this.deckedCells?.has(`${cell.q},${cell.r}`)) return DECK_TOP
     if (this.boardCells?.has(`${cell.q},${cell.r}`)) return DECK_TOP
+    if (this.bridges?.some((b) => b.contains(x, z))) return DECK_TOP
     return terrainHeight(x, z, this.planet)
   }
 
@@ -900,8 +1003,11 @@ export class Colony {
       const r = WALL_HALF_WIDTH
       for (const w of wallRuns(this.boardCells)) {
         const steps = Math.ceil(w.length / r)
+        const gate = this.wallGates?.has(w.id)
         for (let i = 0; i <= steps; i++) {
           const t = i / steps
+          // A gate's archway is open: only its ends are wall.
+          if (gate && t > 0.2 && t < 0.8) continue
           obstacles.push({ x: w.x0 + (w.x1 - w.x0) * t, z: w.z0 + (w.z1 - w.z0) * t, r: r + TRAVEL_RADIUS, keep: r + AGENT_RADIUS })
         }
       }
@@ -956,7 +1062,12 @@ export class Colony {
 
     const ship = shipPosition()
     obstacles.push({ x: ship.x, z: ship.z, r: 3.4 + AGENT_RADIUS })
-    this.nav.rebuild(obstacles)
+    for (const v of this.villageShips?.values() || []) {
+      const p = v.ship.group.position
+      obstacles.push({ x: p.x, z: p.z, r: 3.4 + AGENT_RADIUS })
+    }
+    this.nav.reach(this.worldReach() + 6)
+    this.nav.rebuild(obstacles, this._offLimits())
   }
 
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */
@@ -1029,6 +1140,294 @@ export class Colony {
       if (list.length) clean.set(String(name), list)
     }
     this.plotCells = clean
+  }
+
+  /**
+   * One big name over each village that has anything in it, floated over the middle of its
+   * plots. Rebuilt only when a village's plots change.
+   */
+  _syncVillageLabels() {
+    if (!this.villageLabels) this.villageLabels = new Map()
+    const centres = this.villageCentres()
+    for (const village of VILLAGES) {
+      const at = centres.get(village)
+      const has = this.plotOrder.some((p) => p.village === village)
+      let label = this.villageLabels.get(village)
+      if (!has || (village === 'misc' && !this.plotOrder.some((p) => p.village !== 'misc'))) {
+        // Nothing there, or nothing but Misc: a colony without hexes looks as it always did.
+        if (label) {
+          this.labelGroup.remove(label)
+          label.userData.dispose?.()
+          this.villageLabels.delete(village)
+        }
+        continue
+      }
+      if (!label) {
+        label = createLabel(VILLAGE_LABEL[village].toUpperCase(), 0xffffff)
+        label.material.opacity = 1
+        this.villageLabels.set(village, label)
+        this.labelGroup.add(label)
+      }
+      label.position.set(at.x, 9, at.z)
+    }
+  }
+
+  /**
+   * Where each village is, as a world point: the middle of its plots, or — for one with nothing
+   * on it yet — a point out along its own direction.
+   */
+  villageCentres() {
+    const out = new Map()
+    for (const village of VILLAGES) {
+      const plots = (this.plotOrder || []).filter((p) => p.village === village)
+      if (!plots.length) {
+        // Nothing on it yet: the island's middle, or the ship for an empty Misc.
+        const at = this.villageAnchors?.get(village) || SHIP_CELL
+        out.set(village, hexToWorld(at.q, at.r))
+        continue
+      }
+      let x = 0
+      let z = 0
+      for (const p of plots) {
+        const c = p.middle || p.center
+        x += c.x
+        z += c.z
+      }
+      out.set(village, { x: x / plots.length, z: z / plots.length })
+    }
+    return out
+  }
+
+  /**
+   * A bridge from Misc to each village island that has anything on it: from the Misc cell (or
+   * the ship) nearest the island's middle, to the island cell nearest that. Rebuilt only when
+   * its ends move.
+   */
+  _syncBridges() {
+    if (!this.bridges) this.bridges = []
+    // The bridge leaves from the nearest dry land: Misc, the ship, or a painted map's coast.
+    const misc = [SHIP_CELL]
+    for (const p of this.plotOrder) if (p.village === 'misc') misc.push(...p.cells)
+    const village = new Set(this.plotOrder.filter((p) => p.village !== 'misc').flatMap((p) => p.cells.map((c) => `${c.q},${c.r}`)))
+    for (const c of this._islandLand()) village.add(`${c.q},${c.r}`)
+    for (const keys of this.villageBoard?.values() || []) for (const k of keys) village.add(k)
+    for (const c of this.boardCells?.values?.() || []) if (!village.has(`${c.q},${c.r}`)) misc.push(c)
+    const wanted = []
+    // Only Medieval's islands are joined up: a painted world of towns and coasts wants its
+    // bridges. Anywhere else the islands simply stand apart, each with its own ship.
+    for (const [village, anchor] of this.planet.board ? this.villageAnchors || [] : []) {
+      const own = [
+        ...this.plotOrder.filter((p) => p.village === village).flatMap((p) => p.cells),
+        ...this._islandLand().filter((c) => c.village === village),
+        ...[...(this.villageBoard?.get(village) || [])].map((k) => this.boardCells.get(k)),
+      ]
+      if (!own.length) continue
+      const near = (list, to) => list.reduce((a, c) => (hexDistance(c, to) < hexDistance(a, to) ? c : a), list[0])
+      const a = near(misc, anchor)
+      const b = near(own, a)
+      wanted.push(`${a.q},${a.r}>${b.q},${b.r}>${village}`)
+    }
+    // An island growing moves its flat ground even when its bridge stays put.
+    const islands = this.plotOrder.filter((p) => p.village !== 'misc').map((p) => p.signature)
+    const signature = `${wanted.join('|')}~${islands.join('|')}`
+    if (signature === this._bridgeSignature) return
+    this._bridgeSignature = signature
+    for (const b of this.bridges) {
+      this.plotGroup.remove(b.group)
+      b.dispose()
+    }
+    const flats = []
+    this.bridges = wanted.map((w) => {
+      const [a, b] = w.split('>').slice(0, 2).map((s) => s.split(',').map(Number))
+      const from = hexToWorld(a[0], a[1])
+      const to = hexToWorld(b[0], b[1])
+      const bridge = createBridge(from, to, DECK_TOP)
+      bridge.from = from
+      bridge.to = to
+      bridge.village = w.split('>')[2]
+      flats.push({ x0: from.x, z0: from.z, x1: to.x, z1: to.z, r: 6 })
+      this.plotGroup.add(bridge.group)
+      return bridge
+    })
+    // The islands and the water under the bridges are kept flat like the colony's own middle,
+    // or the hills past it would swallow the decks.
+    for (const [village, anchor] of this.villageAnchors || []) {
+      const plots = this.plotOrder.filter((p) => p.village === village)
+      if (!plots.length) continue
+      const c = hexToWorld(anchor.q, anchor.r)
+      let r = 0
+      for (const cell of [...plots.flatMap((p) => p.cells), ...this._islandLand().filter((l) => l.village === village)]) {
+        const w = hexToWorld(cell.q, cell.r)
+        r = Math.max(r, Math.hypot(w.x - c.x, w.z - c.z))
+      }
+      flats.push({ x: c.x, z: c.z, r: r + PLOT_CELL + 4 })
+    }
+    const flatSignature = JSON.stringify(flats)
+    if (flatSignature !== this._flatSignature) {
+      this._flatSignature = flatSignature
+      setFlatAreas(flats)
+      this._flatsChanged = true
+    }
+  }
+
+  /**
+   * Ground nobody walks on: the sea, and a moat of water round each village island that only
+   * its bridge crosses. Without it the crew take the straight line to an island, through the
+   * water beside the bridge. Sampled once per metre into a mask, rebuilt only when the ground,
+   * the plots or the bridges change, since the terrain is costly to ask.
+   */
+  _offLimits() {
+    const islands = []
+    for (const p of this.plotOrder || []) if (p.village && p.village !== 'misc') for (const c of p.cells) islands.push(hexToWorld(c.q, c.r))
+    const water = this.planet.water?.level
+    if (!islands.length && water === undefined) return null
+    const half = this.nav.half
+    const signature = `${this.planet.id}~${this._terrainVersion}~${half}~${this._bridgeSignature}~${this._plotFootprint()}`
+    if (this._maskSignature !== signature) {
+      this._maskSignature = signature
+      // The ground round each island's castle is land: its crew step off the ramp onto it.
+      const land = new Set(this._islandLand().map((c) => `${c.q},${c.r}`))
+      const size = half * 2
+      const mask = new Uint8Array(size * size)
+      const moat = PLOT_CELL * 2.2
+      for (let iz = 0; iz < size; iz++) {
+        const z = iz - half + 0.5
+        for (let ix = 0; ix < size; ix++) {
+          const x = ix - half + 0.5
+          const cell = worldToHex(x, z)
+          if (this.deckedCells?.has(`${cell.q},${cell.r}`) || land.has(`${cell.q},${cell.r}`)) continue
+          if (this.bridges?.some((b) => b.contains(x, z))) continue
+          let off = water !== undefined && this.groundAt(x, z) < water
+          // A world with a sea has its own moat; a dry one gets a ring of no-go round each island.
+          if (!off && water === undefined) for (const c of islands) if ((x - c.x) ** 2 + (z - c.z) ** 2 < moat * moat) { off = true; break }
+          if (off) mask[iz * size + ix] = 1
+        }
+      }
+      this._walkMask = { half, size, mask }
+    }
+    const { half: h, size, mask } = this._walkMask
+    return (x, z) => {
+      const ix = Math.floor(x + h)
+      const iz = Math.floor(z + h)
+      return ix >= 0 && iz >= 0 && ix < size && iz < size && mask[iz * size + ix] === 1
+    }
+  }
+
+  /**
+   * The land each village island stands its castle on, as cells: the castle's own (the cell
+   * the ship has in Misc, measured from the island's middle) and the one joining it to the
+   * middle. Only for islands with anything on them.
+   */
+  _islandLand() {
+    const out = []
+    for (const [village, a] of this.villageAnchors || []) {
+      if (!this.plotOrder?.some((p) => p.village === village)) continue
+      out.push({ q: a.q + SHIP_CELL.q, r: a.r + SHIP_CELL.r, village }, { q: a.q - 1, r: a.r + 1, village })
+    }
+    return out
+  }
+
+  /** A castle (or a ship, off Medieval) on each village island that has anything on it. */
+  _syncVillageShips() {
+    if (!this.villageShips) this.villageShips = new Map()
+    const wanted = new Map()
+    for (const c of this._islandLand()) if (!wanted.has(c.village)) wanted.set(c.village, c)
+    for (const [village, v] of this.villageShips) {
+      const at = wanted.get(village)
+      if (at && at.q === v.cell.q && at.r === v.cell.r) continue
+      v.ship.dispose()
+      this.villageShips.delete(village)
+    }
+    for (const [village, cell] of wanted) {
+      if (this.villageShips.has(village)) continue
+      const p = hexToWorld(cell.q, cell.r)
+      const ship = new Ship(this.worldGroup, new THREE.Vector3(p.x, 0, p.z))
+      // Ramp toward the island's own middle, the way the main ship's faces the town's.
+      const mid = hexToWorld(this.villageAnchors.get(village).q, this.villageAnchors.get(village).r)
+      ship.group.rotation.y = Math.atan2(mid.x - p.x, mid.z - p.z)
+      const v = { ship, cell }
+      this.villageShips.set(village, v)
+      this._seatShip(v)
+    }
+  }
+
+  /** Stand a village castle on its ground, in the planet's style. */
+  _seatShip(v) {
+    const p = v.ship.group.position
+    v.ship.group.position.y = this.board ? DECK_TOP : terrainHeight(p.x, p.z, this.planet)
+    v.ship.setStyle(this.planet.board ? 'castle' : 'ship')
+  }
+
+  /**
+   * The runs of town wall that become gates: every run crossed by the straight walk from the
+   * ship to where a bridge leaves land, so each village island has a way out of town to it.
+   */
+  _wallGates(board) {
+    const gates = new Set()
+    if (!this.bridges?.length) return gates
+    const ship = shipPosition()
+    const cross = (a, b, c, d) => {
+      const o = (p, q, r) => Math.sign((q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x))
+      return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b)
+    }
+    const runs = wallRuns(board)
+    for (const bridge of this.bridges) {
+      // Out of town to the bridge, and on the island, from its castle down to the bridge.
+      const castle = this.villageShips?.get(bridge.village)?.ship.group.position
+      for (const w of runs) {
+        const a = { x: w.x0, z: w.z0 }
+        const b = { x: w.x1, z: w.z1 }
+        if (cross(ship, bridge.from, a, b) || (castle && cross(castle, bridge.to, a, b))) gates.add(w.id)
+      }
+    }
+    return gates
+  }
+
+  /**
+   * A drag inside one island. Misc drags as it always did; a village island is moved about its
+   * own middle, so its plots slide back together on their own island and never across the water.
+   */
+  planDrag(name, dq, dr) {
+    const village = this.plots.get(name)?.village || 'misc'
+    const layout = new Map()
+    for (const [id, plot] of this.plots) if ((plot.village || 'misc') === village) layout.set(id, plot.cells)
+    const anchor = this.villageAnchors?.get(village)
+    if (!anchor) return planMove(layout, name, dq, dr)
+    const local = new Map([...layout].map(([id, cells]) => [id, translateCells(cells, -anchor.q, -anchor.r)]))
+    const planned = withoutBlocked(() => planMove(local, name, dq, dr))
+    return planned && new Map([...planned].map(([id, cells]) => [id, translateCells(cells, anchor.q, anchor.r)]))
+  }
+
+  /** How far from the middle anything stands, in metres: the farthest plot edge or the ship. */
+  worldReach() {
+    let r = 0
+    for (const p of this.plotOrder || []) for (const c of p.cells) {
+      const w = hexToWorld(c.q, c.r)
+      r = Math.max(r, Math.hypot(w.x, w.z) + PLOT_CELL)
+    }
+    return r
+  }
+
+  /** The plot a thread stands on, or null when it is off the map. */
+  plotIdFor(threadId) {
+    return this.plotOfThread?.get(threadId) ?? null
+  }
+
+  /**
+   * Hand a plot's remembered ground back, for a hex coming out of the archive. Its cells live in
+   * the colony file's hex entry while it is away, so archived hexes never crowd the layout memory.
+   */
+  rememberPlot(id, cells) {
+    if (!cells?.length) return
+    this.plotCells.delete(id)
+    this.plotCells.set(id, cells.map((c) => (Array.isArray(c) ? { q: c[0], r: c[1] } : { q: c.q, r: c.r })))
+  }
+
+  /** Take a plot's ground off the books and return it, as `[q, r]` pairs. */
+  forgetPlot(id) {
+    const cells = this.plotCells.get(id) || this.plots.get(id)?.cells
+    this.plotCells.delete(id)
+    return cells ? cells.map((c) => [c.q, c.r]) : null
   }
 
   /** The same, on the way out. */
@@ -1110,10 +1509,13 @@ export class Colony {
    */
   _updateLabels(dt) {
     const show = this.uiVisible && this.settings.get('showLabels')
+    for (const label of this.villageLabels?.values() || []) label.visible = show
     for (const plot of this.plotOrder) {
       const label = plot.label
       if (!label) continue
-      const wanted = show && (this.activePlots.has(plot.id) || this.hoveredPlot === plot) ? 1 : 0
+      // A hex keeps its name up: it is a ticket or a project you made, and an empty one has
+      // nothing else on it to tell you what it is.
+      const wanted = show && (plot.hexId || this.activePlots.has(plot.id) || this.hoveredPlot === plot) ? 1 : 0
       const next = THREE.MathUtils.damp(label.material.opacity, wanted, 9, dt)
       label.material.opacity = next
       label.visible = next > 0.01
@@ -1171,6 +1573,7 @@ export class Colony {
     // One write turns every rotor in the colony.
     buildingUniforms.uTime.value = elapsed
     this.ship.update(dt, elapsed, night)
+    for (const v of this.villageShips?.values() || []) v.ship.update(dt, elapsed, night)
 
     this._growBuildings(dt)
     this.astronauts.update(dt, elapsed)
@@ -1415,6 +1818,7 @@ export class Colony {
     this.rock?.dispose()
     this.water?.dispose()
     this.ship.dispose()
+    for (const v of this.villageShips?.values() || []) v.ship.dispose()
     this.astronauts.dispose()
     this.indicators.dispose()
     this.particles.dispose()

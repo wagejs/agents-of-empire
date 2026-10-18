@@ -33,19 +33,7 @@ const _near = []
 export class Navigation {
   constructor() {
     this.cell = CELL
-    this.half = HALF
-    this.size = Math.ceil((HALF * 2) / CELL)
-    const n = this.size * this.size
-
-    this.blocked = new Uint8Array(n)
-    this.gScore = new Float32Array(n)
-    this.parent = new Int32Array(n)
-    this.stamp = new Int32Array(n) // which search last touched this node
-    this.closed = new Uint8Array(n)
-
-    this.heap = new Int32Array(n)
-    this.heapKey = new Float32Array(n)
-    this.heapSize = 0
+    this._allocate(HALF)
 
     this.generation = 0
     /** Bumped on every rebuild; agents use it to notice their path is stale. */
@@ -107,9 +95,45 @@ export class Navigation {
    * caller for the astronaut's own width — doing it here would hide the one number that
    * decides whether the gaps between buildings stay walkable.
    */
-  rebuild(obstacles) {
+  /** Size the grid to `half` metres each way. Everything in it is rebuilt by the next `rebuild`. */
+  _allocate(half) {
+    this.half = half
+    this.size = Math.ceil((half * 2) / this.cell)
+    const n = this.size * this.size
+    this.blocked = new Uint8Array(n)
+    this.gScore = new Float32Array(n)
+    this.parent = new Int32Array(n)
+    this.stamp = new Int32Array(n) // which search last touched this node
+    this.closed = new Uint8Array(n)
+    this.heap = new Int32Array(n)
+    this.heapKey = new Float32Array(n)
+    this.heapSize = 0
+  }
+
+  /**
+   * Grow the walkable square to reach `radius` metres from the middle: past it is a wall, and
+   * a village island out at sea has to be somewhere the crew can walk to. Only ever grows, in
+   * whole steps, so a colony that breathes in and out does not reallocate every poll.
+   */
+  reach(radius) {
+    if (radius <= this.half) return
+    this._allocate(Math.ceil(radius / 16) * 16)
+  }
+
+  /**
+   * @param offLimits optional `(x, z) => boolean` for ground nobody walks on whatever stands
+   *   there: the sea, and the water round a village island that only its bridge crosses.
+   */
+  rebuild(obstacles, offLimits = null) {
     this.blocked.fill(0)
     const { size, cell } = this
+    if (offLimits) {
+      for (let iz = 0; iz < size; iz++) {
+        const wz = this.toWorld(iz)
+        const row = iz * size
+        for (let ix = 0; ix < size; ix++) if (offLimits(this.toWorld(ix), wz)) this.blocked[row + ix] = 1
+      }
+    }
     this.solids = obstacles.filter((o) => o.keep > 0)
     // Bucket them. A solid lands in every bucket its keep circle touches, so a point only
     // ever has to look at its own bucket. Scanning neighbouring buckets would apply the
@@ -393,7 +417,8 @@ export class Navigation {
         found = true
         break
       }
-      if (++expansions > MAX_EXPANSIONS) break
+      // A bigger grid (a colony with islands out at sea) needs a longer search to cross it.
+      if (++expansions > Math.max(MAX_EXPANSIONS, (size * size) / 6)) break
 
       const cx = current % size
       const cz = (current - cx) / size

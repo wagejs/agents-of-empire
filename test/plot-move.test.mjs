@@ -164,3 +164,18 @@ test('painted roads: no zone may take one, but a road between zones still joins 
     setBlockedCells([])
   }
 })
+
+test('reconnect leaves a whole colony alone, and refuses when an island has nowhere to land', async () => {
+  const { reconnect, setBlockedCells: block } = await import('../src/world/plot-move.js')
+  const whole = new Map([['a', [{ q: 0, r: 0 }]], ['b', [{ q: 1, r: 0 }]]])
+  assert.equal(reconnect(whole), whole)
+  // Ring the anchor in blocked cells: the island cannot be slid against it.
+  const ring = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]].map(([q, r]) => `${q},${r}`)
+  block(ring)
+  try {
+    const split = new Map([['a', [{ q: 0, r: 0 }]], ['far', [{ q: 5, r: 0 }]]])
+    assert.equal(reconnect(split), null)
+  } finally {
+    block([])
+  }
+})

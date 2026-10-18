@@ -6,7 +6,7 @@ import { mulberry } from './planet.js'
 import { withCurve } from '../core/curve.js'
 import { OVERLAY_LAYER } from '../core/engine.js'
 import { BUILDING_RADIUS } from './buildings.js'
-import { HEX_DIRS, SHIP_CELL, ORIGIN, POOL_RINGS, cellKey as key, hexDistance, isBlocked, isConnected } from './plot-move.js'
+import { HEX_DIRS, SHIP_CELL, ORIGIN, POOL_RINGS, VILLAGE_DIR, cellKey as key, hexDistance, isBlocked, isConnected, reconnect, translateCells, villageAnchor, withoutBlocked } from './plot-move.js'
 
 /**
  * Project plots — the fenced-off sections of the map, one per repo.
@@ -145,11 +145,101 @@ export const cellsNeeded = (threadCount) =>
  */
 export function allocateCells(projects, previous = new Map()) {
   const laid = layOut(projects, previous)
+  if (isConnected(laid)) return laid
   // Remembering where a zone sat is worth a great deal, right up until it leaves the colony
-  // as scattered islands. Then the memory is describing a map that no longer exists, and
-  // starting over — compact, from the middle, the way a first run does it — is the lesser
-  // upheaval. It only happens when the alternative is visibly broken.
-  return isConnected(laid) ? laid : layOut(projects, new Map())
+  // as scattered islands. Archiving a hex is the usual way: the one beyond it is left on its
+  // own. Sliding the islands back moves only them; starting over — compact, from the middle,
+  // the way a first run does it — moves everything, so it is the last resort.
+  return reconnect(laid) || layOut(projects, new Map())
+}
+
+/** Empty rings of water between one island and the next. */
+const ISLAND_GAP = 1
+/** Where a village island's middle is remembered in the layout memory: `[[q, r]]`. */
+export const anchorKey = (village) => `@island:${village}`
+
+/**
+ * The whole world: Misc as the colony always was, and each village an island of its own.
+ *
+ * A village island is laid out exactly like Misc — the same allocator, the same memory, the same
+ * growth from the middle — only about its own middle cell, out along its direction. How far out
+ * follows from how big Misc and the island are, so open water always separates them. It only
+ * ever moves out: when Misc grows the island moves whole, keeping its shape; when Misc shrinks it
+ * stays, because ground you have learned should not drift back and forth with the scan.
+ *
+ * @param projects [{ id, size, village? }]; no village means Misc.
+ * @param previous layout memory, world cells, including each island's remembered middle.
+ * @param mainland cells of land the planet already has (a painted map), as `q,r` keys: an
+ *   island comes in only as close as one ring of sea off that coast, along its own direction.
+ *   Not remembered: it only applies while on that planet.
+ * @param landRings how many rings of land a planet grows round each island's town (Medieval's
+ *   meadow and coast), so the islands' coasts stand clear of each other too.
+ * @returns {{ layout: Map, anchors: Map<village, {q,r}>, memory: Map }} — `memory` is `layout`
+ *   plus the island middles, ready to be passed back as `previous`.
+ */
+/** Every cell within `rings` steps of `cells`, as `q,r` keys. */
+function grow(cells, rings) {
+  const out = new Set(cells.map((c) => key(c.q, c.r)))
+  let edge = [...cells]
+  for (let d = 0; d < rings; d++) {
+    const next = []
+    for (const c of edge) {
+      for (const [dq, dr] of HEX_DIRS) {
+        const k = key(c.q + dq, c.r + dr)
+        if (out.has(k)) continue
+        out.add(k)
+        next.push({ q: c.q + dq, r: c.r + dr })
+      }
+    }
+    edge = next
+  }
+  return out
+}
+
+export function allocateWorld(projects, previous = new Map(), { mainland = null, landRings = 0 } = {}) {
+  const miscProjects = projects.filter((p) => !VILLAGE_DIR[p.village])
+  const layout = allocateCells(miscProjects, previous)
+  // The ship stands two cells out, so Misc reaches at least that far.
+  let miscReach = hexDistance(SHIP_CELL, ORIGIN)
+  for (const cells of layout.values()) for (const c of cells) miscReach = Math.max(miscReach, hexDistance(c, ORIGIN))
+
+  const anchors = new Map()
+  const memory = new Map(layout)
+  for (const village of Object.keys(VILLAGE_DIR)) {
+    const own = projects.filter((p) => p.village === village).map(({ id, size }) => ({ id, size }))
+    // `[middle, base]`: where the island stands now, and where it would without a painted coast
+    // to clear. Only the base is ratcheted out; the coast is added on top each pass.
+    const [was, wasBase = was] = previous.get(anchorKey(village)) || []
+    const wasK = wasBase ? Math.abs(wasBase.q + wasBase.r) : 0
+    // Remembered ground, brought back to the island's own frame. Nothing to bring back without a
+    // remembered middle: anything there is from before islands, and is placed afresh.
+    const local = new Map()
+    if (was) for (const p of own) if (previous.has(p.id)) local.set(p.id, translateCells(previous.get(p.id), -was.q, -was.r))
+    const laid = withoutBlocked(() => allocateCells(own, local))
+    // Every island has a castle where Misc has its ship, so it reaches at least that far.
+    let reach = hexDistance(SHIP_CELL, ORIGIN)
+    for (const cells of laid.values()) for (const c of cells) reach = Math.max(reach, hexDistance(c, ORIGIN))
+    const base = Math.max(wasK, miscReach + reach + ISLAND_GAP + 1)
+    let k = base
+    if (mainland?.size) {
+      // The island's land with a ring of sea round it, about its own middle: its town (plots and
+      // castle), the land the planet grows round that, then the water.
+      const town = [...[...laid.values()].flat(), SHIP_CELL, { q: -1, r: 1 }, ORIGIN]
+      const shore = [...grow(town, landRings + ISLAND_GAP)].map((s) => s.split(',').map(Number))
+      const dir = VILLAGE_DIR[village]
+      const clear = (n) => shore.every(([q, r]) => !mainland.has(key(q + dir.q * n, r + dir.r * n)))
+      while (!clear(k) && k < base + 40) k++
+    }
+    const anchor = villageAnchor(village, k)
+    anchors.set(village, anchor)
+    memory.set(anchorKey(village), [anchor, villageAnchor(village, base)])
+    for (const [id, cells] of laid) {
+      const world = translateCells(cells, anchor.q, anchor.r)
+      layout.set(id, world)
+      memory.set(id, world)
+    }
+  }
+  return { layout, anchors, memory }
 }
 
 /** A harness's home folder, as a project: `.claude`, `.codex` and the like. */

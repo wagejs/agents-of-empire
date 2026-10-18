@@ -32,11 +32,36 @@ export const POOL_RINGS = 12
 export const cellKey = (q, r) => `${q},${r}`
 
 /**
+ * Sprint and Side-project are islands of their own, out along a straight line of cells from the
+ * middle: Sprint one way, Side-project the other, both clear of the ship on Misc's west side.
+ * Straight along an axis so an island's middle is always a whole cell.
+ */
+export const VILLAGE_DIR = { sprint: { q: 0, r: 1 }, side: { q: 0, r: -1 } }
+
+/** The middle cell of a village's island, `k` cells out. */
+export const villageAnchor = (village, k) => ({ q: VILLAGE_DIR[village].q * k, r: VILLAGE_DIR[village].r * k })
+
+/**
  * Cells no zone may take: on a painted map, its roads, rivers and dressed tiles. Zones grow
  * round them and step over them, and they still join the colony up — a road through the
  * middle of town does not make it two towns. Empty everywhere else.
  */
 let blocked = new Set()
+
+/**
+ * Run with no cells blocked. A painted map's roads and rivers are around the middle of Misc; a
+ * village island is laid out about its own middle, where those cells mean nothing.
+ */
+export function withoutBlocked(fn) {
+  const kept = blocked
+  blocked = new Set()
+  try {
+    return fn()
+  } finally {
+    blocked = kept
+  }
+}
+
 export function setBlockedCells(keys) {
   blocked = new Set(keys)
 }
@@ -256,6 +281,14 @@ export function planMove(layout, name, dq, dr) {
   const biggest = groups.reduce((a, g) => (g.size > a.size ? g : a), groups[0])
   if (anchor.size < biggest.size) return null
 
+  return slideStranded(after, anchor, groups)
+}
+
+/**
+ * Slide every group cut loose from `anchor` back until it touches the colony again, each as a
+ * rigid piece so its own shape survives. Null when some piece has nowhere to go.
+ */
+function slideStranded(after, anchor, groups) {
   const stranded = groups.filter((g) => g !== anchor).sort((a, b) => b.size - a.size)
 
   const ship = cellKey(SHIP_CELL.q, SHIP_CELL.r)
@@ -273,7 +306,7 @@ export function planMove(layout, name, dq, dr) {
         const q = c.q + o.dq
         const r = c.r + o.dr
         const k = cellKey(q, r)
-        if (k === ship || placed.has(k)) return false
+        if (k === ship || placed.has(k) || blocked.has(k)) return false
         if (hexDistance({ q, r }, ORIGIN) >= POOL_RINGS) return false
         if (touches) continue
         for (const [nq, nr] of HEX_DIRS) {
@@ -294,4 +327,21 @@ export function planMove(layout, name, dq, dr) {
     }
   }
   return out
+}
+
+/**
+ * Join a colony that has come apart — a hex archived from between two others leaves the far one
+ * an island. The biggest piece stays exactly where it is and the rest slide back to it, which
+ * moves the fewest zones. Null when it cannot be done; the caller then lays out afresh.
+ */
+export function reconnect(layout) {
+  const groups = componentsOf(layout)
+  if (groups.length < 2) return layout
+  // The piece holding the middle stays: that is the hub, and the centre of the map you know.
+  // Otherwise the piece with the most ground, not the most zones — two one-cell hexes must not
+  // outvote a repo that sprawls over six.
+  const cellsOf = (g) => [...g].reduce((n, zone) => n + (layout.get(zone)?.length || 0), 0)
+  const holdsMiddle = (g) => [...g].some((zone) => layout.get(zone)?.some((c) => c.q === ORIGIN.q && c.r === ORIGIN.r))
+  const anchor = groups.find(holdsMiddle) || groups.reduce((a, g) => (cellsOf(g) > cellsOf(a) ? g : a), groups[0])
+  return slideStranded(layout, anchor, groups)
 }

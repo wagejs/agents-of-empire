@@ -27,7 +27,7 @@ export const TILE_DEPTH = 1.5
 const SHORE = 0.15
 /** Decorations stand at the buildings' scale, not the tiles'. */
 const DECOR_SCALE = 2.3
-const LAND_RINGS = 3
+export const LAND_RINGS = 3
 
 export const HEX_DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
 const key = (q, r) => `${q},${r}`
@@ -460,6 +460,7 @@ export function wallRuns(board) {
       const angle = (a * Math.PI) / 180
       const back = WALL_THICK / 2
       runs.push({
+        id: `${key(cell.q, cell.r)}@${a}`,
         cell: key(cell.q, cell.r),
         angle,
         length: TILE_SCALE + back,
@@ -476,7 +477,10 @@ export function wallRuns(board) {
 /** How thick a wall is, for anything that has to keep out of one. */
 export const WALL_HALF_WIDTH = WALL_THICK / 2
 
-export function createHexBoard(board, top, { smooth = true } = {}) {
+/** The pack's archway: a run of wall with an open gate in it, the same length as a plain run. */
+const GATE = 'wall_straight_gate'
+
+export function createHexBoard(board, top, { smooth = true, gates = new Set() } = {}) {
   if (!hasPart('hex_grass', 'medieval')) return null
   const parts = []
   const m = new THREE.Matrix4()
@@ -489,7 +493,9 @@ export function createHexBoard(board, top, { smooth = true } = {}) {
   const runs = hasPart(WALL, 'medieval') ? wallRuns(board) : []
   const walled = new Set(runs.map((w) => w.cell))
   for (const w of runs) {
-    place(WALL, (w.x0 + w.x1) / 2, (w.z0 + w.z1) / 2, -w.angle, w.length / 2, WALL_SCALE, top, WALL_SCALE)
+    // A run the way out to a village island is a gate, so the crew can walk through it.
+    const model = gates.has(w.id) && hasPart(GATE, 'medieval') ? GATE : WALL
+    place(model, (w.x0 + w.x1) / 2, (w.z0 + w.z1) / 2, -w.angle, w.length / 2, WALL_SCALE, top, WALL_SCALE)
   }
   for (const cell of board.values()) {
     const { x, z } = hexToWorld(cell.q, cell.r)

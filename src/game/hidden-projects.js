@@ -24,13 +24,6 @@ export function unhideProject(hidden, name) {
   return hidden.filter((n) => n !== id)
 }
 
-/** The threads the colony should actually draw. */
-export function liveThreadsForColony(threads, archivedIds, hiddenProjects) {
-  const archived = archivedIds instanceof Set ? archivedIds : new Set(archivedIds)
-  const hidden = hiddenProjects instanceof Set ? hiddenProjects : new Set(hiddenProjects)
-  return threads.filter((t) => !t.archived && !archived.has(t.id) && !hidden.has(t.project || 'unknown'))
-}
-
 /**
  * What the sidebar lists, with a live count each — so a hidden repo that has since gone quiet
  * reads as `0` and you can tell it is safe to forget rather than having to show it to find out.

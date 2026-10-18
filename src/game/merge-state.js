@@ -74,7 +74,7 @@ function mergeSet(base, local, remote) {
 }
 
 /**
- * A keyed map — `archivedAt`, `plots`, `seen` — merged key by key.
+ * A keyed map — `archivedAt`, `plots`, `seen`, `hexes`, `placements` — merged key by key.
  *
  * `remote` is the starting point, because everything in it is either untouched or the other
  * tab's work. This tab then replays its own diff against `base` on top: a key it added or
@@ -127,6 +127,8 @@ export function mergeState(base, local, remote) {
     hiddenProjects: mergeSet(b.hiddenProjects, l.hiddenProjects, r.hiddenProjects),
     viewedAt: mergeMap(b.viewedAt, l.viewedAt, r.viewedAt),
     titles: mergeMap(b.titles, l.titles, r.titles),
+    hexes: mergeMap(b.hexes, l.hexes, r.hexes),
+    placements: mergeMap(b.placements, l.placements, r.placements),
     settings: l.settings && typeof l.settings === 'object' ? l.settings : r.settings ?? null,
   }
 }

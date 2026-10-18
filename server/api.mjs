@@ -85,6 +85,8 @@ const emptyState = () => ({
   hiddenProjects: [],
   viewedAt: {},
   titles: {},
+  hexes: {},
+  placements: {},
   settings: null,
   updatedAt: 0,
 })
@@ -94,6 +96,32 @@ const asArray = (v) => (Array.isArray(v) ? v : [])
 /** Names you gave threads here. Only strings with something in them: the page shows each one. */
 const asTitles = (v) =>
   Object.fromEntries(Object.entries(asObject(v)).filter(([, t]) => typeof t === 'string' && t.trim()))
+
+/** The villages a hex can live in. Misc has no hexes: its plots are the repos themselves. */
+const HEX_VILLAGES = new Set(['sprint', 'side'])
+const HEX_NAME_MAX = 80
+const isCell = (c) => Array.isArray(c) && c.length === 2 && c.every(Number.isInteger)
+/**
+ * Hexes you made in the Sprint and Side-project villages. A hex needs a village and a name to
+ * be drawn at all, so anything without both is dropped rather than drawn wrong. `cells` is
+ * where an archived hex stood, kept here rather than in `plots` so archived hexes never crowd
+ * the layout memory.
+ */
+function asHexes(v) {
+  const out = {}
+  for (const [id, hex] of Object.entries(asObject(v))) {
+    if (!hex || typeof hex !== 'object' || !HEX_VILLAGES.has(hex.village)) continue
+    const name = typeof hex.name === 'string' ? hex.name.trim().slice(0, HEX_NAME_MAX) : ''
+    if (!name) continue
+    const clean = { village: hex.village, name, archived: hex.archived === true, createdAt: Number(hex.createdAt) || 0 }
+    if (Array.isArray(hex.cells) && hex.cells.length && hex.cells.every(isCell)) clean.cells = hex.cells
+    out[id] = clean
+  }
+  return out
+}
+/** Which hex each thread was placed in: thread id → hex id. Anything else is dropped. */
+const asPlacements = (v) =>
+  Object.fromEntries(Object.entries(asObject(v)).filter(([, hex]) => typeof hex === 'string' && hex))
 
 async function readState() {
   try {
@@ -108,6 +136,8 @@ async function readState() {
       hiddenProjects: asArray(raw.hiddenProjects).map(String).filter(Boolean),
       viewedAt: asObject(raw.viewedAt),
       titles: asTitles(raw.titles),
+      hexes: asHexes(raw.hexes),
+      placements: asPlacements(raw.placements),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -144,6 +174,8 @@ async function writeState(next) {
     hiddenProjects: asArray(next.hiddenProjects).map(String).filter(Boolean),
     viewedAt: asObject(next.viewedAt),
     titles: asTitles(next.titles),
+    hexes: asHexes(next.hexes),
+    placements: asPlacements(next.placements),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }

@@ -11,6 +11,7 @@ down to the small touches. The [README](../README.md) has the overview; this is 
 - [Quoting](#quoting)
 - [File finder (⌘P)](#file-finder-p)
 - [Threads on the map](#threads-on-the-map)
+- [Villages](#villages)
 - [Pull requests](#pull-requests)
 - [Search](#search)
 - [Orchestration](#orchestration)
@@ -129,7 +130,23 @@ down to the small touches. The [README](../README.md) has the overview; this is 
 - **Walls and scaffolding are obstacles**: builders route round them and never stand inside a wall
   or settle short of their spot.
 
-## Pull requests
+## Villages
+
+- **Three villages, three islands**: Misc is the colony as it always was, one plot per repo.
+  Sprint and Side-project are islands of their own out at sea, joined to Misc by a plank bridge
+  the crew walk across. Each island grows from its own middle the way Misc does, and moves out
+  whole when Misc grows into its water.
+- **Hexes you make by hand**: type a ticket or a side project into the Sprint or Side-project
+  section of the sidebar and it stands on the map at once, empty until you put work there.
+- **Move a thread into a hex** from its card's **Move to** picker, or pick the village and hex
+  when you start a **New chat**. A thread you move keeps its place across branches and restarts.
+- **Sessions follow**: move an orchestrator and its repo sessions go with it; a subagent goes
+  wherever its parent is. Move one on its own and it stays where you put it.
+- **Archive a hex** when the ticket ships: it folds away with its threads, and **Restore** brings
+  it back to the same spot. Archiving a hex with work still running asks first.
+- **Fly to a village** with the target button beside its name in the sidebar.
+- Hiding a repo only tidies Misc: threads you placed in a hex stay on the map.
+
 
 - **A session's PRs show as pills** on the hover card, the bot card and the chat header, read from
   the `pr-link` lines Claude Code writes into the transcript.

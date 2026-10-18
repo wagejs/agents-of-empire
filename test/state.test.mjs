@@ -199,3 +199,58 @@ test('names are saved, and only the ones the page can show', async () => {
     assert.deepEqual(state.titles, { a: 'Auth rewrite' })
   })
 })
+
+// ── villages: hexes and placements ────────────────────────────────────────────
+
+test('a hex made in one tab and a placement made in another both survive the merge', () => {
+  const hex = { village: 'sprint', name: 'LPG-1', archived: false, createdAt: 1 }
+  const merged = mergeState(
+    { hexes: {}, placements: {} },
+    { hexes: { h1: hex }, placements: {} },
+    { hexes: {}, placements: { 't1': 'h0' } }
+  )
+  assert.deepEqual(merged.hexes, { h1: hex })
+  assert.deepEqual(merged.placements, { t1: 'h0' })
+})
+
+test('archiving a hex in one tab while another creates a hex keeps both', () => {
+  const a = { village: 'sprint', name: 'A', archived: false, createdAt: 1 }
+  const b = { village: 'side', name: 'B', archived: false, createdAt: 2 }
+  const merged = mergeState({ hexes: { a } }, { hexes: { a: { ...a, archived: true } } }, { hexes: { a, b } })
+  assert.deepEqual(merged.hexes, { a: { ...a, archived: true }, b })
+})
+
+test('taking a thread back to Misc survives the merge', () => {
+  const merged = mergeState({ placements: { t1: 'h1' } }, { placements: {} }, { placements: { t1: 'h1', t2: 'h2' } })
+  assert.deepEqual(merged.placements, { t2: 'h2' })
+})
+
+test('hexes and placements are saved, and malformed ones are dropped', async () => {
+  await withServer(async ({ call, put }) => {
+    await put({
+      hexes: {
+        good: { village: 'sprint', name: '  LPG-1  ', archived: false, createdAt: 5, cells: [[1, 2]] },
+        side: { village: 'side', name: 'AoE', archived: true, createdAt: 6 },
+        misc: { village: 'misc', name: 'nope', createdAt: 1 },
+        blank: { village: 'sprint', name: '   ' },
+        junk: 'x',
+      },
+      placements: { t1: 'good', t2: 42, t3: '' },
+    })
+    const state = await (await call('/api/state')).json()
+    assert.deepEqual(state.hexes, {
+      good: { village: 'sprint', name: 'LPG-1', archived: false, createdAt: 5, cells: [[1, 2]] },
+      side: { village: 'side', name: 'AoE', archived: true, createdAt: 6 },
+    })
+    assert.deepEqual(state.placements, { t1: 'good' })
+    assert.equal(state.version, 2)
+  })
+})
+
+test('a colony file from before villages loads with none', async () => {
+  await withServer(async ({ call }) => {
+    const state = await (await call('/api/state')).json()
+    assert.deepEqual(state.hexes, {})
+    assert.deepEqual(state.placements, {})
+  })
+})

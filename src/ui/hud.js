@@ -7,6 +7,28 @@ import { PLOT_PALETTE, hashString } from '../world/plots.js'
 import { mdiSitemap, mdiSourceBranch } from '@mdi/js'
 import { prPill, prsFor } from './hover-card.js'
 import { rememberSize } from './resizable.js'
+import { VILLAGE_LABEL } from '../game/villages.js'
+
+/**
+ * The options of a village-and-hex picker, shared by a thread's Move-to and New chat: Misc (the
+ * empty value, the thread's own repo plot), then each village's hexes. A village with none says
+ * so on a disabled line rather than leaving its group empty.
+ */
+export function placeOptionNodes(places, miscLabel) {
+  const nodes = [new Option(miscLabel, '')]
+  for (const v of places) {
+    const group = document.createElement('optgroup')
+    group.label = v.label
+    if (!v.hexes.length) {
+      const none = new Option('No hexes yet: add one in the sidebar', 'none')
+      none.disabled = true
+      group.appendChild(none)
+    }
+    for (const h of v.hexes) group.appendChild(new Option(h.name, h.id))
+    nodes.push(group)
+  }
+  return nodes
+}
 
 /**
  * The whole HUD, in plain DOM.
@@ -494,6 +516,7 @@ export class Hud {
     on('#btn-sound', 'click', () => this.settings.set('sound', !this.settings.get('sound')))
     on('#btn-open', 'click', () => this.actions.openThread?.())
     on('.thread-pop .title', 'click', () => this.rename())
+    on('.side .name', 'click', () => this.renameHex())
     on('#btn-viewed', 'click', () => this.actions.markViewed?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
@@ -525,9 +548,30 @@ export class Hud {
     on('#btn-reveal', 'click', () => this.actions.revealProject?.())
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
     on('#btn-hide-project', 'click', () => this.actions.hideProject?.())
+    on('#btn-archive-hex', 'click', () => this.project?.hexId && this.actions.archiveHex?.(this.project.hexId))
+    this.$('.thread-pop .move-to').addEventListener('change', (e) => {
+      if (this.selected) this.actions.moveThread?.(this.selected.thread.id, e.target.value)
+    })
+    // The village list is redrawn from state on every poll, so its clicks are delegated.
+    this.$('.projects').addEventListener('click', (e) => {
+      const fly = e.target.closest('[data-village-fly]')
+      if (fly) return this.actions.focusVillage?.(fly.dataset.villageFly)
+      const restore = e.target.closest('[data-hex-restore]')
+      if (restore) return this.actions.restoreHex?.(restore.dataset.hexRestore)
+    })
+    this.$('.projects').addEventListener('submit', (e) => {
+      const form = e.target.closest('[data-hex-add]')
+      if (!form) return
+      e.preventDefault()
+      const input = form.querySelector('input')
+      const name = input.value.trim()
+      if (!name) return input.focus()
+      this.actions.createHex?.(form.dataset.hexAdd, name)
+      input.value = ''
+    })
     on('#btn-hidden-toggle', 'click', () => this.toggleHiddenList())
     for (const tab of this.el.querySelectorAll('.side-tabs [data-tab]')) tab.addEventListener('click', () => this.showTab(tab.dataset.tab))
-    on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.name))
+    on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.id ?? this.project?.name))
     on('#btn-close-project', 'click', () => this.actions.closeProject?.())
     on('.help', 'click', (e) => {
       if (e.target === this.$('.help')) this.toggleHelp(false)
@@ -565,37 +609,100 @@ export class Hud {
     }
   }
 
+  /** The Sprint and Side-project villages, with their archived hexes. Drawn by `setLegend`. */
+  setVillages(villages) {
+    this._villages = villages || []
+  }
+
   /**
    * Every repo, in the sidebar. This was a strip of chips along the bottom of the screen;
    * it is a list now because the sidebar is where all the chrome lives, and because a list
    * can carry a count and an alarm without running out of room at eleven repos.
    */
   setLegend(projects, activeName = null, hidden = [], folded = []) {
+    const villages = this._villages || []
     const signature =
-      projects.map((p) => `${p.name}:${p.count}:${p.accent}:${p.urgent ? 1 : 0}`).join('|') +
+      projects.map((p) => `${p.name}:${p.label}:${p.village}:${p.count}:${p.accent}:${p.urgent ? 1 : 0}`).join('|') +
       `~${activeName}~` +
       hidden.map((p) => `${p.name}:${p.count}`).join('|') +
-      `~${folded.length}`
+      `~${folded.length}~` +
+      villages.map((v) => `${v.village}:${v.archived.map((h) => `${h.id}:${h.name}:${h.count}`).join(',')}`).join('|')
     if (this._last.legend === signature) return
     this._last.legend = signature
 
     const wrap = this.$('.projects')
+    // Typing a hex name must survive a poll redrawing the list under it.
+    const typing = document.activeElement?.closest?.('[data-hex-add]')
+    const draft = typing ? { village: typing.dataset.hexAdd, value: typing.querySelector('input').value } : null
     wrap.innerHTML = ''
-    for (const p of projects) {
+    const repoButton = (p) => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = 'repo'
-      b.title = `${p.count} thread${p.count === 1 ? '' : 's'} in ${p.name}`
+      const label = p.label || p.name
+      b.title = `${p.count} thread${p.count === 1 ? '' : 's'} in ${label}`
       b.setAttribute('aria-pressed', String(p.name === activeName))
       b.innerHTML =
         `<i class="swatch" style="background:${hex(p.accent)};color:${hex(p.accent)}"></i>` +
-        `<span class="n">${escapeHtml(p.name)}</span>` +
+        `<span class="n">${escapeHtml(label)}</span>` +
         (p.urgent ? '<i class="alarm"></i>' : '') +
         `<span class="count">${p.count}</span>`
       b.addEventListener('click', () => this.actions.pickProject?.(p.name))
-      wrap.appendChild(b)
+      return b
     }
-    this.$('.projects-pane .sec-head span').textContent = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
+    const head = (village, label, n) => {
+      const h = document.createElement('div')
+      h.className = 'village-head'
+      h.innerHTML =
+        `<span>${escapeHtml(label)}</span><span class="village-n">${n}</span>` +
+        `<button type="button" class="btn icon ghost" data-village-fly="${village}" title="Fly to ${escapeHtml(label)}">${ICON.locate}</button>`
+      return h
+    }
+
+    // Sprint and Side-project first: they are the hexes you made, and there are few of them.
+    for (const v of villages) {
+      const own = projects.filter((p) => p.village === v.village).sort((a, b) => (a.label || '').localeCompare(b.label || ''))
+      wrap.appendChild(head(v.village, v.label, own.length))
+      for (const p of own) wrap.appendChild(repoButton(p))
+      if (!own.length) {
+        const empty = document.createElement('div')
+        empty.className = 'village-empty'
+        empty.textContent = 'No hexes yet'
+        wrap.appendChild(empty)
+      }
+      const form = document.createElement('form')
+      form.className = 'hex-add'
+      form.dataset.hexAdd = v.village
+      form.innerHTML =
+        `<input type="text" maxlength="80" placeholder="${v.village === 'sprint' ? 'Ticket, e.g. ABC-123 login fix' : 'Side project name'}" aria-label="New ${escapeHtml(v.label)} hex">` +
+        `<button type="submit" class="btn ghost">Add</button>`
+      wrap.appendChild(form)
+      if (v.archived.length) {
+        const arch = document.createElement('details')
+        arch.className = 'hex-archived'
+        arch.innerHTML = `<summary>${v.archived.length} archived</summary>`
+        for (const h of v.archived) {
+          const row = document.createElement('div')
+          row.className = 'repo hidden-repo'
+          row.innerHTML =
+            `<span class="n">${escapeHtml(h.name)}</span><span class="count">${h.count}</span>` +
+            `<button type="button" class="btn ghost show-repo" data-hex-restore="${escapeHtml(h.id)}" title="Bring ${escapeHtml(h.name)} back to the map">Restore</button>`
+          arch.appendChild(row)
+        }
+        wrap.appendChild(arch)
+      }
+    }
+    const misc = projects.filter((p) => !p.village || p.village === 'misc')
+    if (villages.length) wrap.appendChild(head('misc', 'Misc', misc.length))
+    for (const p of misc) wrap.appendChild(repoButton(p))
+    if (draft) {
+      const input = wrap.querySelector(`[data-hex-add="${draft.village}"] input`)
+      if (input) {
+        input.value = draft.value
+        input.focus()
+      }
+    }
+    this.$('.projects-pane .sec-head span').textContent = `${projects.length} plot${projects.length === 1 ? '' : 's'}`
 
     // The hidden list is its own block at the foot of the sidebar: collapsed by default, because
     // the whole point of hiding a repo is not to look at it.
@@ -784,7 +891,7 @@ export class Hud {
     // nothing is happening keeps whatever "4m ago" it was first drawn with, for as long as
     // you leave the panel open.
     const signature =
-      `${project.name}~${project.path}~${project.accent}~${project.selectedId}~${Math.floor(Date.now() / 60000)}~` +
+      `${project.id}~${project.name}~${project.path}~${project.accent}~${project.selectedId}~${Math.floor(Date.now() / 60000)}~` +
       project.threads.map((t) => `${t.id}:${t.status}:${t.title}:${t.lastActivityAt}`).join('|')
     panel.classList.add('drilled')
     if (this._last.project === signature) return
@@ -793,12 +900,24 @@ export class Hud {
     const swatch = this.$('.side .who .swatch')
     swatch.style.background = hex(project.accent)
     swatch.style.color = hex(project.accent) // the halo is `currentColor`
-    this.$('.side .name').textContent = project.name
+    const nameEl = this.$('.side .name')
+    if (!this.renamingHex) nameEl.textContent = project.name
+    // A hex is a name you gave it, so you can change it; a repo is named by its folder.
+    nameEl.classList.toggle('renamable', Boolean(project.hexId))
+    nameEl.title = project.hexId ? 'Click to rename' : ''
     const path = this.$('.side .path')
-    path.textContent = project.path ? shortPath(project.path) : 'folder unknown'
+    const village = VILLAGE_LABEL[project.village] || ''
+    path.textContent = project.hexId
+      ? `${village} hex${project.path ? ` · ${shortPath(project.path)}` : ''}`
+      : project.path
+        ? shortPath(project.path)
+        : 'folder unknown'
     path.title = project.path || ''
-    // Nothing to open a new thread in, and nothing to reveal, without a folder on disk.
-    this.$('#btn-new-session').disabled = !project.path
+    // Nothing to open a new thread in, and nothing to reveal, without a folder on disk. A hex
+    // always can: its new thread starts at home and lands here.
+    this.$('#btn-new-session').disabled = !project.path && !project.hexId
+    this.$('#btn-hide-project').hidden = Boolean(project.hexId)
+    this.$('#btn-archive-hex').hidden = !project.hexId
     this.$('#btn-reveal').disabled = !project.path
     this.$('#btn-copy-path').disabled = !project.path
 
@@ -880,6 +999,34 @@ export class Hud {
     input.addEventListener('blur', () => finish(true))
   }
 
+  /** The open hex's name becomes a field, the same way a thread's title does. */
+  renameHex() {
+    const hexId = this.project?.hexId
+    if (!hexId || this.renamingHex) return
+    const current = this.project.name
+    const nameEl = this.$('.side .name')
+    const input = document.createElement('input')
+    input.className = 'rename'
+    input.value = current
+    input.maxLength = 80
+    input.setAttribute('aria-label', 'Hex name')
+    this.renamingHex = true
+    nameEl.replaceChildren(input)
+    input.focus()
+    input.select()
+    const finish = (keep) => {
+      if (!this.renamingHex) return
+      this.renamingHex = false
+      nameEl.textContent = current
+      if (keep && input.value.trim() && input.value.trim() !== current) this.actions.renameHex?.(hexId, input.value)
+    }
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true)
+      else if (e.key === 'Escape') finish(false)
+    })
+    input.addEventListener('blur', () => finish(true))
+  }
+
   setSelection(agent, thread) {
     const card = this.$('.thread-pop')
     // Only ever one accent button in the panel: whichever action is the immediate one.
@@ -916,6 +1063,7 @@ export class Hud {
     }
     meta.innerHTML = bits.join('')
     this.$('.thread-pop .pair').hidden = Boolean(thread.parentId)
+    this._syncMoveTo(thread)
     this.showPrs(thread)
 
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
@@ -936,6 +1084,25 @@ export class Hud {
     // crowd the two that are always worth having, and "Viewed" on a thread that is not asking
     // for anything is a control with no effect.
     this.$('#btn-viewed').hidden = !thread.unread
+  }
+
+  /**
+   * The Move-to picker: Misc (the thread's own repo plot), then each village's hexes. It starts
+   * on wherever the thread is now. Left alone while it is open, so a poll cannot close it on you.
+   */
+  _syncMoveTo(thread) {
+    const row = this.$('.thread-pop .move-row')
+    const pick = this.$('.thread-pop .move-to')
+    row.hidden = Boolean(thread.parentId)
+    if (row.hidden || document.activeElement === pick) return
+    const places = this.actions.placeOptions?.() || []
+    const current = this.actions.placementOf?.(thread.id) || ''
+    const signature = `${thread.id}~${current}~${JSON.stringify(places)}`
+    if (this._last.moveTo === signature) return
+    this._last.moveTo = signature
+    const groups = placeOptionNodes(places, `Misc · ${thread.project || 'its repo'}`)
+    pick.replaceChildren(...groups)
+    pick.value = current
   }
 
   /**
@@ -1399,6 +1566,7 @@ const TEMPLATE = `
           <button class="btn" id="btn-copy-path" title="Copy the folder path">${ICON.copy} Copy path</button>
         </div>
         <button class="btn" id="btn-hide-project" title="Hide this repo from the colony — does not archive its threads">${ICON.eyeOff} Hide from colony</button>
+        <button class="btn" id="btn-archive-hex" title="Fold this hex away with its threads. Restore it from the sidebar" hidden>${ICON.archive} Archive hex</button>
       </div>
       <div class="threads-head"></div>
       <div class="threads"></div>
@@ -1440,6 +1608,10 @@ const TEMPLATE = `
     <button class="btn" id="btn-viewed" title="Stop this thread asking for you until it moves on again (V)">${ICON.eye} Viewed</button>
     <button class="btn" id="btn-archive" title="Archive — this bot walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
+  <label class="move-row">
+    <span>Move to</span>
+    <select class="select move-to" aria-label="Move this thread to a village and hex"></select>
+  </label>
 </div>
 
 <div class="toasts"></div>
