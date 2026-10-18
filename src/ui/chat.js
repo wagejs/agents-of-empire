@@ -24,7 +24,7 @@ const TEMPLATE = `
     <button class="btn ghost" data-next title="Next thread that needs you (⌥N)" hidden></button>
     <button class="btn icon ghost" data-close title="Close (Esc)">${ICON.close}</button>
   </div>
-  <div class="chat-note" hidden></div>
+  <div class="chat-note" hidden><span></span><button type="button" class="note-x" aria-label="Dismiss" title="Dismiss">×</button></div>
   <div class="chat-schedule" hidden></div>
   <div class="chat-log"></div>
   <form class="chat-form">
@@ -240,6 +240,7 @@ export class Chat {
     parent.appendChild(this.el)
     this.$ = (sel) => this.el.querySelector(sel)
     this.log = this.$('.chat-log')
+    this.$('.note-x').addEventListener('click', () => this.note(''))
     // Scrolled up to the top of what is loaded: fetch the turns before it.
     this.log.addEventListener('scroll', () => {
       if (this.log.scrollTop < 80 && this.history?.more && !this.history.loading) this.loadEarlier()
@@ -815,7 +816,7 @@ export class Chat {
 
   note(text, isError = false) {
     const el = this.$('.chat-note')
-    el.textContent = text
+    el.firstElementChild.textContent = text
     el.hidden = !text
     el.classList.toggle('err', isError)
   }

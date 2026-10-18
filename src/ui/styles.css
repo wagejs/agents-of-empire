@@ -1630,6 +1630,26 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
+.chat-note:not([hidden]) {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.chat-note > span {
+  flex: 1;
+}
+
+.note-x {
+  border: 0;
+  padding: 0 4px;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .chat-note.err {
   color: var(--red);
 }
